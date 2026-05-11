@@ -7,7 +7,7 @@ from app.tools.classifier import classify_input
 
 def main():
 
-    user_input = input("Target: ")
+    user_input = input("🔍 Input : ")
 
     state = {
         "user_input": user_input,
@@ -26,4 +26,10 @@ def main():
 
 
 if __name__ == "__main__":
+    print("╔══════════════════════════════════════════════╗")
+    print("║       👁️  OSINT-Argus Multi-Agent           ║")
+    print("║     DomainAgent · EmailAgent · CVEAgent      ║")
+    print("║          RAG Memory · LangGraph              ║")
+    print("╚══════════════════════════════════════════════╝\n")
+
     main()
