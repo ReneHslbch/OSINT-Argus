@@ -16,12 +16,5 @@ Agentic AI OSINT Cybersecurity System
 ```bash
 pip install -r requirements.txt
 create .env
-run : python -m app.main
----
-
-# 5. Git initialisieren
-
-In VS Code Terminal:
-git init
-
+python -m app.main
 ```
