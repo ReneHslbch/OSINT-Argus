@@ -1,0 +1,10 @@
+langgraph
+langchain
+langchain-core
+langchain-community
+langchain-openai
+chromadb
+python-dotenv
+python-whois
+dnspython
+pydantic
