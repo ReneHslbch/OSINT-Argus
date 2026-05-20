@@ -11,5 +11,7 @@ def get_llm():
         api_key=OPENAI_API_KEY,
         base_url=OPENAI_BASE_URL,
         model=MODEL_NAME,
+        timeout=30,          # Abbruch nach 30 Sekunden ohne Antwort
+        max_retries=1,       # Nicht ewig neu versuchen
         temperature=0,
     )

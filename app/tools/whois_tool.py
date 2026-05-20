@@ -1,7 +1,9 @@
+from langchain.tools import tool
 import whois
 
-
+@tool
 def run_whois(domain: str):
+    """Run a WHOIS lookup on a given domain to find registration details."""
     try:
         data = whois.whois(domain)
 
