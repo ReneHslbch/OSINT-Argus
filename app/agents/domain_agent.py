@@ -65,7 +65,7 @@ class DomainAgent(BaseAgent):
         )
 
     def run(self, state: ArgusState) -> ArgusState:
-        domain = state["user_input"]
+        domain = state.get("current_domain") or state["user_input"]
 
         # ── Agent ausführen ──────────────────────────────────────────────────
         result = self._executor.invoke({

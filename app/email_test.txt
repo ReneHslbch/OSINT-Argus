@@ -1,0 +1,22 @@
+From: security-alert@paypa1-verify.ru
+To: max.mustermann@gmail.com
+Subject: Dringende Sicherheitswarnung — Ihr Konto wird gesperrt
+Reply-To: support@account-helpdesk.xyz
+Date: Mon, 25 May 2026 09:14:33 +0000
+
+Sehr geehrter Kunde,
+
+wir haben ungewöhnliche Aktivitäten in Ihrem PayPal-Konto festgestellt.
+Um eine dauerhafte Sperrung zu verhindern, müssen Sie Ihre Identität 
+innerhalb von 24 Stunden bestätigen.
+
+Klicken Sie hier um Ihr Konto zu verifizieren:
+https://paypal-secure-login.account-verify.xyz/confirm?token=8f3kA92
+
+Falls Sie keinen Zugriff auf den obigen Link haben, besuchen Sie:
+https://www.paypal.com/de/help
+
+Bei Fragen wenden Sie sich an unser Support-Team.
+
+Mit freundlichen Grüßen,
+PayPal Sicherheitsteam
