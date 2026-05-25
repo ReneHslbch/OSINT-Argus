@@ -20,16 +20,18 @@ Built with **LangGraph**, **LangChain** and **ChromaDB**. Designed as a modular,
 - [Running the App](#running-the-app)
 - [Example Output](#example-output)
 - [Sprint Status](#sprint-status)
-- [Roadmap — Sprint 2](#roadmap--sprint-2)
+- [Roadmap — Sprint 3](#roadmap--sprint-3)
 - [Tech Stack](#tech-stack)
 
 ---
 
 ## Overview
 
-OSINT-Argus is a **supervisor-pattern multi-agent system** that accepts a free-form user input (a domain name, email address, or URL), classifies it automatically, and routes it to the appropriate specialised agent. Each agent executes a defined set of OSINT tools and returns structured findings that are aggregated into a final risk report.
+OSINT-Argus is a **supervisor-pattern multi-agent system** that accepts a free-form user input (a domain name, raw email, or URL), classifies it automatically, and routes it to the appropriate specialised agent. Each agent executes a defined set of OSINT tools and returns structured findings that are aggregated into a final risk report.
 
 The goal is to give any user — without technical OSINT knowledge — a clear, actionable answer to the question: **"Is this domain / email / link safe?"**
+
+The system outputs a **risk score (0–100)**, a **risk level** (LOW / MEDIUM / HIGH / CRITICAL), a plain-language summary, and a concrete **action recommendation** — ready to drive a traffic-light UI on any frontend.
 
 ---
 
@@ -48,22 +50,35 @@ User Input
 │  OrchestratorAgent  (LLM-powered routing supervisor)    │
 │  • Validates / overrides classifier result              │
 │  • Sets next_agent in shared ArgusState                 │
-│  • Uses structured output (RouteDecision Pydantic model)│
+│  • Drives adaptive email pipeline (EmailPipelineDecision)│
+│  • Routes to OutputAgent when analysis is complete      │
 └────────────┬───────────────────────┬────────────────────┘
              │                       │
-          domain                  email / cve / output
+          domain                   email
              ▼                       ▼
-┌────────────────────┐        ┌──────────────────────┐
-│   DomainAgent      │        │  [Sprint 2 Agents]   │
-│   (LangChain       │        │  EmailAgent          │
-│    AgentExecutor + │        │  CVEAgent            │
-│    6 OSINT tools)  │        │  OutputAgent         │
-└────────┬───────────┘        └──────────────────────┘
-         │ findings[]
+┌────────────────────┐     ┌─────────────────────────────┐
+│   DomainAgent      │     │   EmailAgent                │
+│   (AgentExecutor + │     │   Pass 1 — Extraction       │
+│    6 OSINT tools)  │     │   (headers, URLs, domains)  │
+└────────┬───────────┘     │   Pass 2 — Judgement        │
+         │                 │   (VirusTotal + LLM report) │
+         │                 └──────────────┬──────────────┘
+         │                                │
+         └──────────┬─────────────────────┘
+                    │ both routes back to OrchestratorAgent
+                    ▼
+┌─────────────────────────────────────────────────────────┐
+│  OutputAgent  (LLM structured output)                   │
+│  • Aggregates all findings                              │
+│  • Produces risk_score (0–100), risk_level, summary     │
+│  • Generates action_advice for the user                 │
+└─────────────────────────────────────────────────────────┘
+         │
          ▼
 ┌─────────────────────────────────────────────────────────┐
 │  ArgusState  (shared LangGraph state, TypedDict)        │
-│  • findings, risk_score, summary, memory_context        │
+│  • findings, risk_score, risk_level                     │
+│  • summary, action_advice, memory_context               │
 └─────────────────────────────────────────────────────────┘
          │
          ▼
@@ -73,7 +88,7 @@ User Input
 └─────────────────────────────────────────────────────────┘
 ```
 
-The graph is compiled with **LangGraph `StateGraph`** and uses conditional edges so that the orchestrator's routing decision (`next_agent`) determines which agent node runs next.
+The graph is compiled with **LangGraph `StateGraph`** and uses conditional edges so that the orchestrator's routing decision (`next_agent`) determines which agent node runs next. Every analysis agent routes back to the orchestrator; the orchestrator decides when enough data is gathered and routes to `OutputAgent`.
 
 ---
 
@@ -83,33 +98,37 @@ The graph is compiled with **LangGraph `StateGraph`** and uses conditional edges
 MultiAgent-OSINT-Argus/
 │
 ├── app/
-│   ├── main.py                  # Entry point — reads user input, builds initial state, invokes graph
-│   ├── graph.py                 # LangGraph StateGraph definition — nodes, edges, entry point
-│   ├── state.py                 # ArgusState TypedDict — shared state schema for all agents
-│   ├── config.py                # Loads .env — API keys, base URL, model name
+│   ├── main.py                    # Entry point — reads input, builds state, invokes graph
+│   ├── graph.py                   # LangGraph StateGraph — nodes, edges, entry point
+│   ├── state.py                   # ArgusState TypedDict — shared state schema
+│   ├── config.py                  # Loads .env — API keys, base URL, model name
 │   │
 │   ├── agents/
-│   │   ├── base_agent.py        # Abstract BaseAgent (ABC) — defines run(state) interface
-│   │   ├── orchestrator_agent.py # LLM-based routing supervisor — sets next_agent
-│   │   └── domain_agent.py      # Full domain analysis via 6 OSINT tools + LLM report
+│   │   ├── base_agent.py          # Abstract BaseAgent — defines run(state) interface
+│   │   ├── orchestrator_agent.py  # LLM routing supervisor + adaptive email pipeline
+│   │   ├── domain_agent.py        # Domain OSINT analysis via 6 tools + LLM report
+│   │   ├── email_agent.py         # Email phishing analysis — Pass 1 extraction, Pass 2 judgement
+│   │   └── output_agent.py        # Final risk report — score, level, summary, action advice
 │   │
 │   ├── models/
-│   │   ├── llm.py               # ChatOpenAI factory — returns configured LLM instance
-│   │   └── router.py            # RouteDecision Pydantic model — structured output schema
+│   │   ├── llm.py                 # ChatOpenAI factory — configured LLM instance
+│   │   └── router.py              # Pydantic models: RouteDecision, EmailPipelineDecision, OutputReport
 │   │
 │   ├── memory/
-│   │   └── chroma_memory.py     # ChromaDB client — save_analysis() + search_memory()
+│   │   └── chroma_memory.py       # ChromaDB client — save_analysis() + search_memory()
 │   │
 │   └── tools/
-│       ├── classifier.py        # Regex classifier — fast pre-routing before LLM
-│       ├── whois_tool.py        # WHOIS lookup — registrar, dates, name servers
-│       ├── dns_tool.py          # DNS records — A, MX, NS
-│       └── domain_tools.py      # 4 advanced tools: SSL, SPF/DMARC/DKIM, URLhaus, crt.sh
+│       ├── classifier.py          # Regex classifier — fast pre-routing before LLM
+│       ├── whois_tool.py          # WHOIS lookup — registrar, dates, name servers
+│       ├── dns_tool.py            # DNS records — A, MX, NS
+│       ├── domain_tools.py        # SSL, SPF/DMARC/DKIM, URLhaus, crt.sh
+│       └── email_tools.py         # URL extraction, header parsing, Reply-To check, VirusTotal
 │
-├── .env                         # Local secrets (not committed)
-├── .env.example                 # Template for required environment variables
-├── requirements.txt             # Python dependencies
-└── README.md                    # This file
+├── app/email_test.txt             # Sample phishing email for local testing
+├── .env                           # Local secrets (not committed)
+├── .env.example                   # Template for required environment variables
+├── requirements.txt               # Python dependencies
+└── README.md                      # This file
 ```
 
 ---
@@ -117,6 +136,7 @@ MultiAgent-OSINT-Argus/
 ## Agents
 
 ### `BaseAgent` — Abstract Interface
+
 Every agent inherits from `BaseAgent` and must implement one method:
 
 ```python
@@ -130,30 +150,32 @@ The agent receives the full shared state, performs its work, appends its finding
 ### `OrchestratorAgent` — Routing Supervisor
 **File:** `app/agents/orchestrator_agent.py`
 
-The central coordinator of the system. Uses the configured LLM with **structured output** (via `with_structured_output(RouteDecision)`) to classify the user's input and decide which agent to dispatch next.
+The central coordinator. Handles two distinct routing modes depending on the conversation stage:
 
-**How it works:**
-1. Receives the user input from state
-2. Sends a system prompt + user input to the LLM
-3. LLM returns a `RouteDecision` Pydantic object with `input_type`, `next_agent`, and `reasoning`
-4. Sets `state["next_agent"]` which LangGraph uses as the conditional edge key
-5. Appends the routing decision to `state["findings"]` for full auditability
+**Initial routing** (first call): Uses `with_structured_output(RouteDecision)` to classify the input and set `next_agent`. Initialises email pipeline fields if the input is an email.
+
+**Email pipeline routing** (subsequent calls during email analysis): Uses `with_structured_output(EmailPipelineDecision)` to adaptively decide after each domain scan whether to scan another domain, trigger EmailAgent Pass 2 (judgement), or skip straight to output if the threat is already critical.
+
+**Post-domain routing**: After `DomainAgent` completes for a direct domain input, the orchestrator detects the finished finding via `_agent_ran()` and routes to `OutputAgent` — preventing re-routing loops.
 
 **Supported routes:**
 
-| Input Type | Next Agent |
-|------------|------------|
-| `domain`   | `domain`   |
-| `email`    | `email` *(Sprint 2)* |
-| `cve` topic | `cve` *(Sprint 2)* |
-| unknown    | `output`   |
+| Trigger | Next Agent |
+|---------|------------|
+| Domain input, first call | `domain` |
+| Domain input, DomainAgent already ran | `output` |
+| Email input, more domains to scan | `domain` |
+| Email input, enough data for judgement | `email` (Pass 2) |
+| Email input, critical signal found | `output` (skip Pass 2) |
+| Email Pass 2 complete | `output` |
+| Unknown input | `output` |
 
 ---
 
 ### `DomainAgent` — Full Domain OSINT Analysis
 **File:** `app/agents/domain_agent.py`
 
-The most complete agent in Sprint 1. Built on a **LangChain `AgentExecutor`** with `create_tool_calling_agent`, giving the LLM the ability to autonomously call all 6 OSINT tools in sequence and reason over the results.
+Built on a **LangChain `AgentExecutor`** with `create_tool_calling_agent`. Supports both standalone domain analysis and being called mid-pipeline for individual domains inside an email scan (reads `state.get("current_domain") or state["user_input"]`).
 
 **Mandatory execution order (enforced via system prompt):**
 1. `run_whois` → domain age, registrar, expiry
@@ -163,7 +185,7 @@ The most complete agent in Sprint 1. Built on a **LangChain `AgentExecutor`** wi
 5. `run_spf_dmarc_check` → email security posture (SPF, DMARC, DKIM)
 6. `run_ssl_check` → TLS certificate validity and expiry
 
-After all tools have run, the LLM produces a **structured JSON report**:
+After all tools have run, the LLM produces a structured JSON report:
 
 ```json
 {
@@ -173,61 +195,82 @@ After all tools have run, the LLM produces a **structured JSON report**:
 }
 ```
 
-The agent handles both clean JSON and markdown-fenced responses (`\`\`\`json ... \`\`\``), with a full fallback parser for edge cases.
+---
 
-**Findings written to state:**
-```python
+### `EmailAgent` — Phishing Analysis (Two-Pass)
+**File:** `app/agents/email_agent.py`
+
+Analyses raw email content in two passes, orchestrated adaptively by the `OrchestratorAgent`.
+
+**Pass 1 — Extraction** (`_run_pass1`): Pure Python, no LLM call. Parses email headers, extracts all URLs, derives domains to scan, detects Reply-To mismatches. Writes `email_extraction` and `domains_to_scan` to state so the orchestrator can drive domain scans.
+
+**Pass 2 — Judgement** (`_run_pass2`): LLM-powered. Receives the domain analysis findings already gathered by `DomainAgent`, calls `check_virustotal_domain` on the sender domain, then produces a JSON content assessment:
+
+```json
 {
-  "agent": "DomainAgent",
-  "domain": "example.com",
-  "whois": { ... },
-  "dns": { ... },
-  "crtsh": { ... },
-  "urlhaus": { ... },
-  "email_security": { ... },
-  "ssl": { ... },
-  "ai_analysis": {
-    "threat_indicators": [...],
-    "exposure_findings": [...],
-    "summary": "..."
-  }
+  "phishing_indicators": ["Dringlichkeit", "Impersonation", "Reply-To Mismatch"],
+  "content_risk": "HIGH",
+  "sender_assessment": "Domain paypa1-verify.ru ist bekannte Phishing-Domain",
+  "summary": "..."
 }
 ```
 
 ---
 
+### `OutputAgent` — Final Risk Report
+**File:** `app/agents/output_agent.py`
+
+The terminal agent. Collects every finding from `state["findings"]`, formats them into a compact prompt, and uses `with_structured_output(OutputReport)` to produce a fully typed final report.
+
+**Output written to state:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `risk_score` | `int` (0–100) | Numeric risk — maps directly to frontend progress bar or gauge |
+| `risk_level` | `"LOW" \| "MEDIUM" \| "HIGH" \| "CRITICAL"` | Traffic-light level |
+| `summary` | `str` | Plain-language summary for end users (no jargon) |
+| `action_advice` | `str` | Concrete recommendation: what to do right now |
+| `indicators` | `List[str]` | Top 3–5 key risk factors found |
+
+**Traffic-light mapping for frontend:**
+
+| Score | Level | Colour |
+|-------|-------|--------|
+| 0–33 | LOW | 🟢 Green — no action needed |
+| 34–66 | MEDIUM | 🟡 Yellow — proceed with caution |
+| 67–84 | HIGH | 🔴 Red — action recommended |
+| 85–100 | CRITICAL | 🚨 Red — act immediately |
+
+**Example action_advice per level:**
+- **LOW:** "Diese Domain ist unbedenklich. Du kannst sie besuchen."
+- **MEDIUM:** "Öffne den Link nicht direkt. Navigiere stattdessen manuell zur offiziellen Website."
+- **HIGH:** "Besuche diese Domain nicht. Lösche die E-Mail und melde sie als Spam."
+- **CRITICAL:** "Sofort handeln: Klicke keine Links, öffne keine Anhänge. Melde die E-Mail an deine IT-Abteilung."
+
+---
+
 ## Tools
 
-All tools are registered as **LangChain `@tool`** decorated functions, making them directly callable by any `AgentExecutor` or tool-calling LLM.
+All tools are registered as **LangChain `@tool`** decorated functions.
 
 ### `run_whois` — WHOIS Lookup
 **File:** `app/tools/whois_tool.py`
 
-Queries public WHOIS databases for domain registration metadata. Returns registrar, creation date, expiration date, and name servers. Useful for detecting freshly registered domains (a common phishing indicator).
-
-**Returns:** `registrar`, `creation_date`, `expiration_date`, `name_servers`
+Queries public WHOIS databases for domain registration metadata. Returns registrar, creation date, expiration date, and name servers. Freshly registered domains are a common phishing indicator.
 
 ---
 
 ### `run_dns_lookup` — DNS Record Lookup
 **File:** `app/tools/dns_tool.py`
 
-Resolves `A`, `MX`, and `NS` records using `dnspython`. Missing MX records can indicate a domain not intended for email but used for spoofing. Unexpected A records can signal compromise.
-
-**Returns:** dict with `A`, `MX`, `NS` record arrays
+Resolves `A`, `MX`, and `NS` records using `dnspython`. Missing MX records can indicate a domain not intended for email but used for spoofing.
 
 ---
 
 ### `run_ssl_check` — TLS Certificate Analysis
 **File:** `app/tools/domain_tools.py`
 
-Performs a direct TLS handshake on port 443 using Python's `ssl` module with `certifi` as the CA bundle. Detects:
-
-- Expired certificates
-- Certificates expiring within 14 days (CRITICAL) or 30 days (WARNING)
-- Self-signed certificates
-- WAF/TLS-interception (Cloudflare, Myra)
-- Port 443 unreachable
+Direct TLS handshake on port 443 using Python's `ssl` module with `certifi`. Detects expired certs, certs expiring within 14/30 days, self-signed certs, and WAF/TLS-interception (Cloudflare, Myra).
 
 **Verdicts:** `OK` | `WARNING` | `CRITICAL` | `UNKNOWN`
 
@@ -236,13 +279,7 @@ Performs a direct TLS handshake on port 443 using Python's `ssl` module with `ce
 ### `run_spf_dmarc_check` — Email Security Posture
 **File:** `app/tools/domain_tools.py`
 
-Checks whether a domain is protected against email spoofing by querying TXT DNS records for:
-
-- **SPF** — must exist and contain `-all` or `~all`
-- **DMARC** (`_dmarc.<domain>`) — must exist; `p=none` flags as monitoring-only
-- **DKIM** — probes 7 common selectors (`default`, `google`, `mail`, `k1`, `dkim`, `s1`, `s2`)
-
-A missing or weak configuration means anyone can spoof `@<domain>` emails.
+Checks whether a domain is protected against email spoofing via SPF, DMARC (`_dmarc.<domain>`), and DKIM (probes 7 common selectors). A missing or weak configuration means anyone can spoof `@<domain>` emails.
 
 **Verdicts:** `SECURE` | `EXPOSED`
 
@@ -251,15 +288,7 @@ A missing or weak configuration means anyone can spoof `@<domain>` emails.
 ### `run_urlhaus` — Malware Database Check
 **File:** `app/tools/domain_tools.py`
 
-Queries the **URLhaus API** (`urlhaus-api.abuse.ch/v1/host/`) — a public malware URL feed maintained by abuse.ch. No API key required.
-
-Extracts:
-- Whether the domain is known as a malware host
-- Count of active vs total malicious URLs
-- Malware family tags
-- Blacklist status
-
-Handles HTTP 401 (WAF block) and HTTP 429 (rate limit) gracefully with informative error messages.
+Queries the **URLhaus API** (abuse.ch) — no API key required. Extracts whether the domain is a known malware host, active/total malicious URL counts, malware family tags, and blacklist status.
 
 **Verdicts:** `CLEAN` | `MALICIOUS` | `UNKNOWN`
 
@@ -268,12 +297,23 @@ Handles HTTP 401 (WAF block) and HTTP 429 (rate limit) gracefully with informati
 ### `run_crtsh` — Subdomain Enumeration via Certificate Transparency
 **File:** `app/tools/domain_tools.py`
 
-Queries `crt.sh` for all SSL certificates ever issued for a domain. Since every certificate must be publicly logged, this reveals all subdomains without any DNS brute-forcing.
+Queries `crt.sh` for all SSL certificates ever issued for a domain. Caps at 100 certs, returns top 20 unique subdomains. Flags domains with more than 15 subdomains as elevated attack surface.
 
-- Caps at 100 certificates to prevent memory overhead on large domains
-- Returns top 20 unique subdomains
-- Flags domains with more than 15 subdomains as having elevated attack surface
-- Filters wildcard entries (`*.example.com`)
+---
+
+### Email Tools
+**File:** `app/tools/email_tools.py`
+
+A set of pure-Python helper functions used by `EmailAgent` Pass 1 plus one LangChain tool:
+
+| Function | Description |
+|----------|-------------|
+| `extract_urls(text)` | Regex-based URL extraction from raw email body |
+| `extract_domain_from_url(url)` | Strips scheme and path, returns bare domain |
+| `parse_email_headers(text)` | Extracts From, To, Subject, Reply-To, Date |
+| `extract_sender_domain(from_header)` | Parses `Name <user@domain>` and `user@domain` formats |
+| `check_reply_to_mismatch(headers)` | Detects Reply-To ≠ From domain — classic phishing signal |
+| `check_virustotal_domain` | `@tool` — VirusTotal v3 domain reputation (requires `VT_API_KEY`) |
 
 ---
 
@@ -284,34 +324,63 @@ Queries `crt.sh` for all SSL certificates ever issued for a domain. Since every 
 
 ```python
 class ArgusState(TypedDict):
-    user_input: str          # Raw input from the user
-    input_type: str          # Classified type: domain | email | url | unknown
-    current_agent: str       # Currently executing agent
-    next_agent: str          # Routing target — used by LangGraph conditional edges
-    findings: List[Dict]     # Append-only log of all agent outputs
-    risk_score: Optional[int]  # Aggregate risk (0–100), set by OutputAgent in Sprint 2
-    summary: Optional[str]     # Human-readable final report
-    memory_context: Optional[str]  # Retrieved ChromaDB context for RAG enrichment
+    # Sprint 1
+    user_input:     str
+    input_type:     str
+    current_agent:  str
+    next_agent:     str
+    findings:       List[Dict[str, Any]]
+    risk_score:     Optional[int]
+    summary:        Optional[str]
+    memory_context: Optional[str]
+
+    # Sprint 2 — Email pipeline
+    email_pass:       int                      # 0=init | 1=extraction done | 2=judgement done
+    domains_to_scan:  List[str]                # from EmailAgent Pass 1
+    domains_scanned:  List[str]                # updated by Orchestrator after each DomainAgent run
+    current_domain:   Optional[str]            # domain currently being analysed by DomainAgent
+    email_extraction: Optional[Dict[str, Any]] # Pass 1 result
+
+    # Sprint 2 — OutputAgent
+    risk_level:    Optional[str]   # "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
+    action_advice: Optional[str]   # concrete action recommendation for the user
 ```
 
-### `RouteDecision` — Structured Routing Schema
+### Pydantic Models
 **File:** `app/models/router.py`
 
-A Pydantic model that constrains the OrchestratorAgent's LLM output to a valid, typed routing decision:
-
+**`RouteDecision`** — initial routing by the Orchestrator:
 ```python
 class RouteDecision(BaseModel):
     input_type: Literal["domain", "email", "url", "unknown"]
-    next_agent: Literal["domain", "email", "cve", "output"]
-    reasoning: str  # Audit trail — why this route was selected
+    next_agent:  Literal["domain", "email", "cve", "output"]
+    reasoning:   str
 ```
 
-Using `with_structured_output(RouteDecision)` guarantees the LLM cannot hallucinate an invalid agent name, making routing deterministic and safe.
+**`EmailPipelineDecision`** — adaptive email pipeline routing:
+```python
+class EmailPipelineDecision(BaseModel):
+    action:        Literal["scan_domain", "proceed_to_judgement", "proceed_to_output"]
+    target_domain: Optional[str]                    # only for action=scan_domain
+    reasoning:     str
+    confidence:    Literal["LOW", "MEDIUM", "HIGH"]
+```
+
+**`OutputReport`** — final risk report from OutputAgent:
+```python
+class OutputReport(BaseModel):
+    risk_score:    int                                          # 0–100, validated
+    risk_level:    Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    explanation:   str                                          # technical, for experts
+    summary:       str                                          # plain language, for users
+    action_advice: str                                          # concrete recommendation
+    indicators:    List[str]                                    # top 3–5 risk factors
+```
 
 ### Input Classifier
 **File:** `app/tools/classifier.py`
 
-A lightweight regex pre-classifier that runs **before** the LLM to provide a fast first-pass answer. The OrchestratorAgent can confirm or override this classification.
+Lightweight regex pre-classifier before the LLM call.
 
 | Pattern | Classification |
 |---------|----------------|
@@ -325,19 +394,14 @@ A lightweight regex pre-classifier that runs **before** the LLM to provide a fas
 
 **File:** `app/memory/chroma_memory.py`
 
-Uses a **persistent ChromaDB client** stored in `./chroma_db/`. The collection `argus_memory` stores past analysis results as documents, enabling **Retrieval-Augmented Generation (RAG)** in future runs.
+Persistent ChromaDB client stored in `./chroma_db/`. The collection `argus_memory` stores past analysis results as documents, enabling **Retrieval-Augmented Generation (RAG)** in future runs.
 
 ```python
-# Save an analysis result
 save_analysis(query="example.com", content="<full analysis JSON>")
-
-# Retrieve relevant past context (top 3 nearest neighbours)
-results = search_memory(query="example.com")
+results = search_memory(query="example.com")  # top 3 nearest neighbours
 ```
 
-This means that if a domain was analysed before, the system can recall and reuse those findings to enrich the current analysis — without re-querying all external APIs.
-
-> **Note:** ChromaDB integration is initialised and connected in Sprint 1. Active RAG injection into agent prompts is planned for Sprint 2.
+> Active RAG injection into agent prompts is planned for Sprint 3.
 
 ---
 
@@ -347,6 +411,7 @@ This means that if a domain was analysed before, the system can recall and reuse
 
 - Python 3.11+
 - Access to an OpenAI-compatible API (e.g. [SAIA / Academic Cloud](https://chat-ai.academiccloud.de))
+- Optional: VirusTotal API key (free tier sufficient for EmailAgent)
 
 ### Installation
 
@@ -364,30 +429,30 @@ pip install -r requirements.txt
 
 # 4. Set up environment variables
 cp .env.example .env
-# Edit .env with your actual API keys (see Configuration below)
+# Edit .env with your actual API keys
 ```
 
 ---
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in your values:
-
 ```env
 # Required — OpenAI-compatible API
 OPENAI_API_KEY=your_api_key_here
-OPENAI_BASE_URL=https://chat-ai.academiccloud.de/v1   # or https://api.openai.com/v1
-MODEL_NAME=mistral-large-instruct                      # or gpt-4o, etc.
+OPENAI_BASE_URL=https://chat-ai.academiccloud.de/v1
+MODEL_NAME=mistral-large-instruct
 
-# Optional — required for Sprint 2 agents
-VT_API_KEY=your_virustotal_key       # EmailAgent — VirusTotal lookups
-SHODAN_API_KEY=your_shodan_key       # Future infrastructure scanning
+# Required for EmailAgent Pass 2
+VT_API_KEY=your_virustotal_key
+
+# Future — Sprint 3
+SHODAN_API_KEY=your_shodan_key
 ```
 
 **Notes:**
-- `OPENAI_BASE_URL` supports any OpenAI-compatible endpoint. The project was developed and tested against the **German Academic Cloud (SAIA)** endpoint.
-- `MODEL_NAME` was selected after evaluating multiple models for structured output reliability (tool-calling accuracy and JSON schema adherence).
-- The `VT_API_KEY` and `SHODAN_API_KEY` are not used in Sprint 1 but must be present in `.env` for future sprints.
+- `OPENAI_BASE_URL` supports any OpenAI-compatible endpoint. Developed and tested against the **German Academic Cloud (SAIA)**.
+- LLM timeout is set to **120 seconds** with 2 retries — adjusted from Sprint 1's 30s/1 retry after encountering SAIA latency issues.
+- `VT_API_KEY` is now actively used by EmailAgent Pass 2 for sender domain reputation checks.
 
 ---
 
@@ -397,74 +462,88 @@ SHODAN_API_KEY=your_shodan_key       # Future infrastructure scanning
 python -m app.main
 ```
 
-The CLI banner will appear and prompt for input:
-
 ```
 ╔══════════════════════════════════════════════╗
-║       👁️  OSINT-Argus Multi-Agent           ║
+║       👁️  OSINT-Argus Multi-Agent            ║
 ║     DomainAgent · EmailAgent · CVEAgent      ║
 ║          RAG Memory · LangGraph              ║
 ╚══════════════════════════════════════════════╝
 
-🔍 Input : example.com
+📝 Eingabe (leere Zeile zum Abschließen):
 ```
 
-**Supported inputs (Sprint 1):**
+Multi-line input is supported — paste a full email, then press Enter on an empty line to submit. For pipe mode (`cat email.txt | python -m app.main`), EOF is handled automatically.
+
+**Supported inputs:**
 
 | Input | Routed To | Status |
 |-------|-----------|--------|
-| `example.com` | DomainAgent | ✅ Working |
-| `sub.example.com` | DomainAgent | ✅ Working |
-| `user@example.com` | EmailAgent | 🔜 Sprint 2 |
-| CVE topic / keyword | CVEAgent | 🔜 Sprint 2 |
+| `example.com` | DomainAgent → OutputAgent | ✅ Working |
+| `sub.example.com` | DomainAgent → OutputAgent | ✅ Working |
+| Raw email with headers | EmailAgent (2-pass) → OutputAgent | ✅ Working |
+| CVE topic / keyword | CVEAgent | 🔜 Sprint 3 |
 
 ---
 
 ## Example Output
 
-For input `example.com`, the graph produces a findings list similar to:
+### Domain Analysis — `example.com`
 
 ```python
+# state["findings"] (abbreviated)
 [
   {
     "agent": "OrchestratorAgent",
-    "decision": {
-      "input_type": "domain",
-      "next_agent": "domain",
-      "reasoning": "Input matches domain pattern — routing to DomainAgent."
-    }
+    "decision": { "input_type": "domain", "next_agent": "domain", "reasoning": "..." }
   },
   {
     "agent": "DomainAgent",
     "domain": "example.com",
-    "whois": {
-      "registrar": "RESERVED-Internet Assigned Numbers Authority",
-      "creation_date": "1995-08-14 04:00:00",
-      "expiration_date": "2025-08-13 04:00:00",
-      "name_servers": ["A.IANA-SERVERS.NET", "B.IANA-SERVERS.NET"]
-    },
-    "dns": { "A": ["93.184.216.34"], "MX": [], "NS": [...] },
-    "ssl": {
-      "valid": true,
-      "days_until_expiry": 248,
-      "issuer": "DigiCert Inc",
-      "verdict": "OK"
-    },
-    "email_security": {
-      "spf": { "configured": false, "issues": ["Kein SPF-Record — Spoofing möglich"] },
-      "dmarc": { "configured": false },
-      "email_spoofing_possible": true,
-      "verdict": "EXPOSED"
-    },
-    "urlhaus": { "threat_found": false, "verdict": "CLEAN" },
-    "crtsh": { "subdomain_count": 3, "subdomains": [...] },
+    "ssl":            { "verdict": "OK", "days_until_expiry": 248 },
+    "email_security": { "verdict": "EXPOSED", "email_spoofing_possible": True },
+    "urlhaus":        { "verdict": "CLEAN" },
     "ai_analysis": {
       "threat_indicators": [],
-      "exposure_findings": ["Kein SPF-Record konfiguriert", "Kein DMARC-Record vorhanden"],
-      "summary": "example.com ist eine IANA-Reservierungsdomain ohne aktive Dienste..."
+      "exposure_findings": ["Kein SPF-Record", "Kein DMARC-Record"],
+      "summary": "example.com ist eine IANA-Reservierungsdomain..."
     }
+  },
+  {
+    "agent":        "OutputAgent",
+    "risk_score":   18,
+    "risk_level":   "LOW",
+    "explanation":  "Die Domain example.com ist eine IANA-Reservierungsdomain...",
+    "summary":      "Diese Domain ist unbedenklich und wird von IANA verwaltet.",
+    "action_advice":"Keine Aktion erforderlich. Du kannst diese Domain besuchen.",
+    "indicators":   ["Kein SPF-Record konfiguriert", "Kein DMARC-Record vorhanden"]
   }
 ]
+```
+
+### Email Analysis — Phishing Mail
+
+```
+═══════════════════════════════════════════════════════════
+  🚨  OSINT-Argus Risikobericht
+═══════════════════════════════════════════════════════════
+  Risiko-Score : 94/100  [CRITICAL]
+  Zusammenfassung:
+    Diese E-Mail ist eine klassische PayPal-Phishing-Mail.
+    Der Absender nutzt eine gefälschte Domain (paypa1-verify.ru)
+    und der Reply-To zeigt auf eine andere verdächtige Domain.
+
+  🎯 Empfehlung:
+    Sofort handeln: Klicke keine Links, öffne keine Anhänge.
+    Lösche die E-Mail und melde sie als Spam. Falls du bereits
+    auf den Link geklickt hast, ändere sofort dein Passwort.
+
+  ⚠️  Indikatoren:
+     • Absender-Domain paypa1-verify.ru als MALICIOUS eingestuft (VirusTotal)
+     • Reply-To Mismatch: account-helpdesk.xyz ≠ paypa1-verify.ru
+     • Dringlichkeitstaktik: "Konto wird gesperrt in 24 Stunden"
+     • Impersonation: gibt sich als PayPal-Sicherheitsteam aus
+     • Verdächtiger Login-Link auf account-verify.xyz
+═══════════════════════════════════════════════════════════
 ```
 
 ---
@@ -475,46 +554,54 @@ For input `example.com`, the graph produces a findings list similar to:
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| LangGraph `StateGraph` initialised | ✅ Done | `OrchestratorAgent` + `DomainAgent` as nodes |
-| `ArgusState` TypedDict schema | ✅ Done | Full state contract defined |
-| WHOIS tool (`run_whois`) | ✅ Done | `python-whois` |
-| DNS tool (`run_dns_lookup`) | ✅ Done | `dnspython`, A/MX/NS records |
-| SSL certificate check (`run_ssl_check`) | ✅ Done | `ssl` + `certifi`, WAF detection |
-| SPF/DMARC/DKIM check (`run_spf_dmarc_check`) | ✅ Done | Spoofing exposure detection |
-| URLhaus malware check (`run_urlhaus`) | ✅ Done | abuse.ch API, no key required |
-| Subdomain enumeration (`run_crtsh`) | ✅ Done | Certificate Transparency |
-| Input Classifier (regex) | ✅ Done | Fast pre-routing |
-| OrchestratorAgent (LLM routing) | ✅ Done | Structured output via `RouteDecision` |
-| DomainAgent (AgentExecutor) | ✅ Done | 6 tools + LLM JSON report |
-| ChromaDB connected | ✅ Done | Persistent collection `argus_memory` |
-| Model selection & evaluation | ✅ Done | Mistral Large via SAIA |
+| LangGraph `StateGraph` | ✅ | `OrchestratorAgent` + `DomainAgent` |
+| `ArgusState` TypedDict | ✅ | Full state contract |
+| WHOIS tool | ✅ | `python-whois` |
+| DNS tool | ✅ | `dnspython`, A/MX/NS |
+| SSL check | ✅ | WAF detection, expiry warnings |
+| SPF/DMARC/DKIM check | ✅ | Spoofing exposure detection |
+| URLhaus check | ✅ | abuse.ch, no key required |
+| Subdomain enumeration (crt.sh) | ✅ | Certificate Transparency |
+| Input Classifier (regex) | ✅ | Fast pre-routing |
+| OrchestratorAgent (LLM routing) | ✅ | `RouteDecision` structured output |
+| DomainAgent (AgentExecutor) | ✅ | 6 tools + LLM JSON report |
+| ChromaDB connected | ✅ | Persistent `argus_memory` collection |
+| Model selection & evaluation | ✅ | Mistral Large via SAIA |
+
+### ✅ Sprint 2 — Email Pipeline + Output (Complete)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `EmailAgent` Pass 1 — header & URL extraction | ✅ | Pure Python, no LLM call |
+| `EmailAgent` Pass 2 — LLM phishing judgement | ✅ | VirusTotal + content analysis |
+| `email_tools.py` — URL/header/VirusTotal utilities | ✅ | `check_virustotal_domain` as LangChain `@tool` |
+| `EmailPipelineDecision` Pydantic model | ✅ | Adaptive orchestration |
+| Adaptive Orchestrator email routing | ✅ | LLM decides scan vs. judge vs. skip |
+| Multi-domain scanning within email pipeline | ✅ | Orchestrator loops DomainAgent per domain |
+| `DomainAgent` — `current_domain` support | ✅ | Works standalone and inside email pipeline |
+| `OutputAgent` — final risk report | ✅ | `OutputReport` structured output |
+| Risk score (0–100) + risk level | ✅ | Frontend-ready traffic-light mapping |
+| Plain-language summary | ✅ | Jargon-free, for end users |
+| Action advice | ✅ | Specific per input type and risk level |
+| `graph.py` — full pipeline wired | ✅ | domain/email → orchestrator → output → END |
+| LLM timeout increased to 120s | ✅ | Handles SAIA latency |
+| Multi-line CLI input + pipe mode | ✅ | Paste full emails, or `cat file \| python -m app.main` |
 
 ---
 
-## Roadmap — Sprint 2
-
-**Goal:** Full multi-agent system — all 3 input scenarios routed and analysed correctly.
-
-### EmailAgent
-- VirusTotal API integration for email/IP/URL reputation
-- LLM-based phishing detection (header analysis, sender patterns)
-- Reputation scoring
+## Roadmap — Sprint 3
 
 ### CVEAgent
 - NVD NIST API integration (`nvd.nist.gov/rest/json`)
 - MITRE ATT&CK technique mapping
 - CVSS severity enrichment
-
-### OutputAgent
-- Aggregate risk score calculation (0–100) across all findings
-- Structured, human-readable report generation
-- Markdown/JSON dual output
+- Routing from OrchestratorAgent for CVE IDs and vulnerability topics
 
 ### System-wide improvements
-- End-to-end routing tests for all 3 input types
-- Edge case handling (partial inputs, mixed types)
 - Active RAG injection from ChromaDB into agent prompts
-- Code scalability refactor — shared tool utilities, error handling standardisation
+- Shodan integration in DomainAgent for infrastructure scanning
+- End-to-end test suite covering all 3 input scenarios
+- Frontend (REST API or Streamlit) consuming `risk_score`, `risk_level`, `action_advice`
 
 ---
 
