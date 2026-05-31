@@ -1,136 +1,113 @@
 import json
-from langchain_openai import ChatOpenAI
-from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 
 from app.agents.base_agent import BaseAgent
 from app.state import ArgusState
-from app.tools.whois_tool import run_whois
-from app.tools.dns_tool import run_dns_lookup
 from app.models.llm import get_llm
-from app.tools.domain_tools import run_crtsh, run_urlhaus, run_spf_dmarc_check, run_ssl_check
-import os
+from app.models.findings import Findings
+from app.models.agent_type import AgentType
+from app.tools.domain_tools import DOMAIN_TOOLS  # Lädt alle deine echten OSINT-Tools
 
 llm = get_llm()
 
-# ── Tool-Liste ───────────────────────────────────────────────────────────────
-DOMAIN_TOOLS = [
-    run_whois,
-    run_dns_lookup,
-    run_crtsh,
-    run_urlhaus,
-    run_spf_dmarc_check,
-    run_ssl_check,
-]
+SYSTEM_PROMPT_DOMAIN = """Du bist der DomainAgent von OSINT-Argus.
+Deine Aufgabe: Analysiere die übergebene Domain mithilfe der bereitgestellten OSINT-Tools.
+Sammle öffentliche Daten über DNS, WHOIS, SSL/TLS, E-Mail-Sicherheit (SPF/DMARC), Malware-Reputation (URLhaus) und Web-Technologien.
 
-# ── System-Prompt ─────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """Du bist der DomainAgent von OSINT-Argus, einem Cybersecurity-Analyse-System.
+Deine Kernaufgabe ist die Triage:
+1. Identifiziere Bedrohungen (Threats) wie Malware-Einträge oder bösartige Infrastruktur.
+2. Identifiziere Schwachstellen (Vulnerabilities) wie fehlende Mail-Sicherheits-Header, abgelaufene Zertifikate oder veraltete Technologien.
+3. Extrahiere Subdomains und genutzte Web-Technologien (z. B. "nginx 1.18.0", "WordPress"), damit sie im System weiterverarbeitet werden können.
 
-Deine Aufgabe: Analysiere eine Domain vollständig und systematisch.
-
-PFLICHTABLAUF — führe IMMER alle diese Tools aus:
-1. run_whois          → Domain-Alter, Registrar, Ablauf
-2. run_dns_lookup     → DNS-Records (A, MX, NS, TXT)
-3. run_crtsh          → Subdomains via Certificate Transparency
-4. run_urlhaus        → Malware-Datenbank-Check
-5. run_spf_dmarc_check → E-Mail-Sicherheit (SPF, DMARC, DKIM)
-6. run_ssl_check      → SSL-Zertifikat-Status
-
-Nach allen Tool-Aufrufen erstelle ein JSON-Objekt mit dieser exakten Struktur:
+Erstelle am Ende ein JSON-Objekt mit exakt dieser Struktur:
 {{
-  "threat_indicators": ["Liste konkreter Bedrohungsindikatoren (z.B. fehlende Records)"],
-  "exposure_findings": ["Liste konkreter Schwachstellen oder Risiken"],
-  "summary": "2-3 Sätze Gesamtbewertung auf Deutsch"
+  "threat_indicators": ["Liste konkreter Bedrohungen / Malware-Befunde"],
+  "exposure_findings": ["Liste von Schwachstellen / Fehlkonfigurationen / SSL-Problemen"],
+  "discovered_subdomains": ["Liste von neu entdeckten Subdomains, die weiter untersucht werden sollten"],
+  "discovered_technologies": ["Liste identifizierter Technologien mit Version für den CVEAgent, z.B. 'nginx 1.18.0'"],
+  "summary": "2-3 Sätze prägnante Gesamtbewertung der Domain auf Deutsch."
 }}
 
-Antworte AUSSCHLIESSLICH mit dem validen JSON-Objekt. Keine Erklärungen drumherum, kein Text vor oder nach dem JSON."""
-
+WICHTIG: Falls ein Tool wie 'run_crtsh' oder 'run_tech_detection' keine Subdomains oder Technologien findet, lasse die Listen einfach leer [].
+Antworte AUSSCHLIESSLICH mit dem validen JSON-Objekt."""
 
 class DomainAgent(BaseAgent):
-
     def __init__(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("human", "{input}"),
+            ("system", SYSTEM_PROMPT_DOMAIN),
+            ("human", "Analysiere diese Domain auf Sicherheitsrisiken und Technologien: {input}"),
             ("placeholder", "{agent_scratchpad}"),
         ])
+        # Erstellt den Agenten mit deinen echten domain_tools
         agent = create_tool_calling_agent(llm, DOMAIN_TOOLS, prompt)
         self._executor = AgentExecutor(
             agent=agent,
             tools=DOMAIN_TOOLS,
-            verbose=True,          # Zeigt Tool-Aufrufe im Terminal
-            max_iterations=12,     # Alle 6 Tools + Puffer
-            return_intermediate_steps=True,
+            verbose=True,
+            max_iterations=8,  # Etwas mehr Iterationen, da wir viele Tools haben
+            return_intermediate_steps=True
         )
 
     def run(self, state: ArgusState) -> ArgusState:
-        domain = state.get("current_domain") or state["user_input"]
+        # Hole das aktuelle Target vom Orchestrator
+        target = state.get("current_check")
+        
+        if not target:
+            print("⚠️ DomainAgent: Kein Target (Domain) zum Prüfen übergeben.")
+            return state
 
-        # ── Agent ausführen ──────────────────────────────────────────────────
-        result = self._executor.invoke({
-            "input": (
-                f"Analysiere die Domain: {domain}\n"
-                f"Führe alle 6 Tools aus und erstelle den JSON-Report."
-            )
-        })
+        print(f"\n🌐 [DomainAgent] Starte OSINT-Reconnaissance für: {target}...")
 
-        # ── Tool-Rohdaten extrahieren ────────────────────────────────────────
-        raw_tool_data = {}
-        for action, observation in result.get("intermediate_steps", []):
-            tool_name = action.tool
-            try:
-                raw_tool_data[tool_name] = (
-                    json.loads(observation)
-                    if isinstance(observation, str)
-                    else observation
-                )
-            except (json.JSONDecodeError, TypeError):
-                raw_tool_data[tool_name] = {"raw": str(observation)}
-
-        # ── LLM-Analyse robust parsen ────────────────────────────────────────
+        # Führe die Agent-Chain aus
+        result = self._executor.invoke({"input": target})
         llm_output = result.get("output", "").strip()
-        analysis = None
 
+        # Robustes JSON Parsing der LLM-Ausgabe
         try:
-            # Fall 1: LLM hat Markdown-Fences benutzt (```json ... ```)
             if "```" in llm_output:
                 content = llm_output.split("```")[1]
                 if content.startswith("json"):
                     content = content[4:]
                 analysis = json.loads(content.strip())
             else:
-                # Fall 2: LLM hat das JSON direkt als nackten String ausgegeben
                 analysis = json.loads(llm_output)
-        except (json.JSONDecodeError, IndexError, ValueError):
-            # Fallback, falls das Parsing komplett fehlschlägt
+        except Exception:
+            # Fallback bei Parsing-Fehlern
             analysis = {
                 "threat_indicators": [],
-                "exposure_findings": ["Fehler beim Parsen der LLM-Antwort."],
-                "summary": llm_output if llm_output else "Keine Ausgabe vom LLM erhalten."
+                "exposure_findings": ["Parsing-Fehler bei LLM-Ausgabe"],
+                "discovered_subdomains": [],
+                "discovered_technologies": [],
+                "summary": llm_output or "Keine strukturierte Ausgabe erhalten."
             }
 
-        # ── State befüllen ───────────────────────────────────────────────────
-        state["findings"].append({
-            "agent": "DomainAgent",
-            "domain": domain,
-            # Rohdaten aller Tools
-            "whois":   raw_tool_data.get("run_whois", {}),
-            "dns":     raw_tool_data.get("run_dns_lookup", {}),
-            "crtsh":   raw_tool_data.get("run_crtsh", {}),
-            "urlhaus": raw_tool_data.get("run_urlhaus", {}),
-            "email_security": raw_tool_data.get("run_spf_dmarc_check", {}),
-            "ssl":     raw_tool_data.get("run_ssl_check", {}),
-            # Strukturierte KI-Analyse
-            "ai_analysis": analysis,
-        })
-
-        # Da im Sprint 1 kein globaler Risk-Score gefordert ist,
-        # belassen wir ihn einfach unverändert oder auf dem Initialwert.
+        # ── VARIANTE 1: STATE DYNAMISCH ERWEITERN ───────────────────────────
         
-        # visited_agents pflegen
-        visited = state.get("visited_agents", [])
-        visited.append("domain")
-        state["visited_agents"] = visited
+        # 1. Neue Subdomains in die Queue werfen
+        #new_subs = analysis.get("discovered_subdomains", [])
+        #if new_subs:
+         #   print(f"➕ [DomainAgent] {len(new_subs)} neue Subdomains entdeckt und an 'to_scan' angehängt.")
+          #  state["to_scan"].extend(new_subs)
+
+        # 2. Erkannte Technologien für den CVEAgent in die Queue werfen
+        new_techs = analysis.get("discovered_technologies", [])
+        if new_techs:
+            print(f"➕ [DomainAgent] {len(new_techs)} Technologien für CVE-Suche extrahiert ({', '.join(new_techs)}).")
+            state["to_scan"].extend(new_techs)
+            
+        # ───────────────────────────────────────────────────────────────────
+
+        # Dataclass Instanz erzeugen und an findings hängen
+        finding = Findings(
+            agent=AgentType.DOMAIN,
+            input=target,
+            threat_sum=analysis.get("threat_indicators", []),
+            vulnerability_sum=analysis.get("exposure_findings", [])
+        )
+        state["findings"].append(finding)
+        
+        # Speicher die Summary im globalen Kontext ab
+        state["memory_context"] = analysis.get("summary", "")
 
         return state

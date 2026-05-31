@@ -1,114 +1,58 @@
 import json
 from langchain_core.prompts import ChatPromptTemplate
 from app.agents.base_agent import BaseAgent
+from app.models.router import OutputReport
 from app.state import ArgusState
 from app.models.llm import get_llm
-from app.models.router import OutputReport
-
+from app.models.findings import Findings
+from app.models.agent_type import AgentType
 
 llm = get_llm()
 
+SYSTEM_PROMPT = """Du bist der OutputAgent von OSINT-Argus. Deine Aufgabe ist es, aus allen gesammelten Agenten-Findings einen finalen, nicht-deterministischen Cybersecurity-Risikobericht zu generieren.
 
-# ── Risiko-Schwellen für den Prompt ─────────────────────────────────────────
-RISK_THRESHOLDS = """
-Risiko-Score-Skala (0–100):
-  0–33   → LOW      (grün)   — kein unmittelbares Risiko erkennbar
-  34–66  → MEDIUM   (gelb)   — Vorsicht geboten, aber keine akute Gefahr
-  67–84  → HIGH     (rot)    — klare Bedrohungssignale, Handlung empfohlen
-  85–100 → CRITICAL (rot🔴)  — aktive Bedrohung, sofort handeln
+Analysiere die Findings aus zwei Blickwinkeln:
+1. Threat Score (0-100): Gibt es Anzeichen für aktive Angreifer, Phishing-Absichten, Malware (URLhaus) oder böswillige Absichten?
+2. Vulnerability Score (0-100): Gibt es offene Flanken? (Fehlendes SPF/DMARC, abgelaufenes SSL, bekannte Software-CVEs)?
+
+Leite daraus das risk_level ab:
+- LOW (Scores vorwiegend < 33)
+- MEDIUM (Scores vorwiegend 34-66)
+- HIGH (Scores vorwiegend 67-84)
+- CRITICAL (Scores vorwiegend 85-100 oder akuter Phishing/Malware-Befund)
+
+WICHTIG FÜR DIE HANDLUNGSANWEISUNGEN:
+- Formuliere in 'action_prevent' eine klare Warnung, was auf KEINEN Fall getan werden darf (z.B. 'Nicht auf Links klicken, da...').
+- Erstelle in 'action_incident_response' eine klare, chronologische 1., 2., 3.-Schritt-Anleitung für den Fall, DASS der Nutzer bereits auf den Link geklickt, die Datei geöffnet oder mit dem Absender interagiert hat.
+
+Regeln:
+- Tool-Fehler/Timeouts fließen NICHT negativ in die Scores ein.
+- Nutze nur explizit beobachtete Fakten aus den Findings. Erfinde nichts.
 """
-
-SYSTEM_PROMPT = f"""Du bist der OutputAgent von OSINT-Argus, einem Cybersecurity-Analyse-System.
-Du erhältst alle gesammelten Findings aus der Analyse und erstellst daraus einen 
-abschließenden Risikobericht.
-
-{RISK_THRESHOLDS}
-
-Deine Aufgaben:
-1. Bewerte alle Findings zusammen und vergib einen risk_score (0–100)
-2. Leite daraus das risk_level ab (LOW / MEDIUM / HIGH / CRITICAL)
-3. Schreibe eine technische explanation (3–5 Sätze, für Experten)
-4. Schreibe eine einfache summary (2–3 Sätze, für Laien — kein Fachjargon)
-5. Formuliere einen konkreten action_advice je nach Risikostufe:
-   - LOW:      "Keine Aktion erforderlich. [optionale Empfehlung]"
-   - MEDIUM:   "Vorsicht. [was konkret vermeiden/prüfen]"
-   - HIGH:     "Nicht empfohlen. [was konkret tun / nicht tun]"
-   - CRITICAL: "Sofort handeln. [klare, direkte Anweisung]"
-6. Liste die 3–5 wichtigsten indicators auf (kurze Stichpunkte)
-
-Wichtig:
-- Der action_advice soll handlungsanleitend und spezifisch sein, nicht generisch.
-- Beispiele für guten action_advice:
-  * LOW:      "Diese Domain ist unbedenklich. Du kannst sie besuchen."
-  * MEDIUM:   "Öffne den Link nicht direkt. Gehe stattdessen manuell auf die offizielle Website."
-  * HIGH:     "Besuche diese Domain nicht. Lösche die E-Mail und melde sie als Spam."
-  * CRITICAL: "Sofort handeln: Klicke nicht auf Links, öffne keine Anhänge. Melde die E-Mail 
-               an deine IT-Abteilung oder leite sie an abuse@[deine-firma].de weiter."
-- Passe den advice an den Eingabetyp an (Domain-Analyse vs. E-Mail-Analyse).
-
-Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt ohne Markdown-Fences.
-"""
-
 
 def _format_findings_for_llm(state: ArgusState) -> str:
-    """Alle relevanten Findings kompakt für den LLM-Prompt aufbereiten."""
+    """Extrahiert Daten direkt aus den Attributen der neuen Findings-Dataclass."""
+    if not state.get("findings"):
+        return "Keine Findings vorhanden."
+        
     lines = []
-
-    for finding in state["findings"]:
-        agent = finding.get("agent", "Unknown")
-
-        # ── OrchestratorAgent: nur Routing-Entscheidungen ──────────────────
-        if agent == "OrchestratorAgent":
-            decision = finding.get("decision", {})
-            lines.append(
-                f"[Orchestrator] input_type={decision.get('input_type', '—')} | "
-                f"next_agent={decision.get('next_agent', '—')}"
-            )
-
-        # ── DomainAgent ─────────────────────────────────────────────────────
-        elif agent == "DomainAgent":
-            ai = finding.get("ai_analysis", {})
-            lines.append(
-                f"[DomainAgent] Domain: {finding.get('domain', '—')}\n"
-                f"  Threat Indicators:  {ai.get('threat_indicators', [])}\n"
-                f"  Exposure Findings:  {ai.get('exposure_findings', [])}\n"
-                f"  Summary:            {ai.get('summary', '—')}\n"
-                f"  URLhaus:            {finding.get('urlhaus', {}).get('verdict', '—')}\n"
-                f"  SSL:                {finding.get('ssl', {}).get('verdict', '—')}\n"
-                f"  Email Security:     {finding.get('email_security', {}).get('verdict', '—')}"
-            )
-
-        # ── EmailAgent Pass 1 ───────────────────────────────────────────────
-        elif agent == "EmailAgent" and finding.get("pass") == 1:
-            lines.append(
-                f"[EmailAgent Pass 1]\n"
-                f"  Von:              {finding.get('from', '—')}\n"
-                f"  Betreff:          {finding.get('subject', '—')}\n"
-                f"  Reply-To Mismatch:{finding.get('reply_to_mismatch', False)}\n"
-                f"  URLs gefunden:    {finding.get('urls_found', 0)}\n"
-                f"  Domains to scan:  {finding.get('domains_to_scan', [])}"
-            )
-
-        # ── EmailAgent Pass 2 ───────────────────────────────────────────────
-        elif agent == "EmailAgent" and finding.get("pass") == 2:
-            ai = finding.get("ai_analysis", {})
-            vt = finding.get("virustotal_sender", {})
-            lines.append(
-                f"[EmailAgent Pass 2]\n"
-                f"  Phishing Indicators: {ai.get('phishing_indicators', [])}\n"
-                f"  Content Risk:        {ai.get('content_risk', '—')}\n"
-                f"  Sender Assessment:   {ai.get('sender_assessment', '—')}\n"
-                f"  VT Sender Verdict:   {vt.get('verdict', '—')} "
-                f"(malicious={vt.get('malicious', '—')})\n"
-                f"  Summary:             {ai.get('summary', '—')}"
-            )
-
-    return "\n\n".join(lines) if lines else "Keine Findings vorhanden."
+    for f in state["findings"]:
+        # Bestimme den Namen des Agenten aus dem Enum oder String
+        agent_name = f.agent.value if hasattr(f.agent, "value") else str(f.agent)
+        
+        lines.append(
+            f"=== Finding von Agent: {agent_name} ===\n"
+            f"Prüfobjekt (Input): {f.input}\n"
+            f"Bedrohungen (Threats): {f.threat_sum}\n"
+            f"Schwachstellen (Vulnerabilities): {f.vulnerability_sum}\n"
+        )
+    return "\n".join(lines)
 
 
 class OutputAgent(BaseAgent):
 
     def __init__(self):
+        # Nutzen des erweiterten Pydantic-Modells
         self._llm = llm.with_structured_output(OutputReport)
 
     def run(self, state: ArgusState) -> ArgusState:
@@ -116,9 +60,9 @@ class OutputAgent(BaseAgent):
         findings_text = _format_findings_for_llm(state)
 
         prompt_input = (
-            f"Eingabetyp: {input_type}\n\n"
-            f"=== GESAMMELTE FINDINGS ===\n{findings_text}\n\n"
-            f"Erstelle jetzt den finalen Risikobericht."
+            f"Eingabetyp des Systems: {input_type}\n\n"
+            f"=== ALLE AGENTEN FINDINGS ===\n{findings_text}\n\n"
+            f"Erstelle den finalen Risikobericht inklusive Vorbeugung und Incident-Response-Schritten."
         )
 
         try:
@@ -127,56 +71,61 @@ class OutputAgent(BaseAgent):
                 {"role": "user",   "content": prompt_input},
             ])
         except Exception as e:
-            # Fallback falls structured output scheitert
-            print(f"⚠️  OutputAgent: Structured output fehlgeschlagen — {e}")
+            print(f"⚠️ OutputAgent: Structured output fehlgeschlagen — {e}")
+            # Fallback bei unerwarteten API- oder Parsingfehlern
             report = OutputReport(
-                risk_score=50,
+                threat_score=50,
+                vulnerability_score=50,
                 risk_level="MEDIUM",
-                explanation="Analyse konnte nicht vollständig ausgewertet werden.",
-                summary="Die Bewertung ist unvollständig. Vorsicht empfohlen.",
-                action_advice="Bitte manuell prüfen — automatische Bewertung fehlgeschlagen.",
-                indicators=["Parsing-Fehler im OutputAgent"],
+                explanation="Der Bericht konnte aufgrund eines technischen Fehlers nicht generiert werden.",
+                summary="Automatische Berichterstellung fehlgeschlagen.",
+                action_prevent="Interagiere nicht mit den Objekten, bis eine manuelle Prüfung stattfand.",
+                action_incident_response=["1. System isolieren", "2. IT-Sicherheit kontaktieren"],
+                indicators=["Parsing-Fehler im OutputAgent"]
             )
 
         # ── State befüllen ───────────────────────────────────────────────────
-        state["risk_score"]    = report.risk_score
-        state["risk_level"]    = report.risk_level
-        state["summary"]       = report.summary
-        state["action_advice"] = report.action_advice
+        # Mappe die Werte so in den State, wie dein System sie erwartet
+        state["risk_score"] = max(report.threat_score, report.vulnerability_score) # Kombinierter Richtwert
+        state["risk_level"] = report.risk_level
+        state["summary"] = report.summary
+        state["action_advice"] = f"PRÄVENTION:\n{report.action_prevent}\n\nFALLS BEREITS GEKLICKT:\n" + "\n".join(report.action_incident_response)
 
-        state["findings"].append({
-            "agent":       "OutputAgent",
-            "risk_score":  report.risk_score,
-            "risk_level":  report.risk_level,
-            "explanation": report.explanation,
-            "summary":     report.summary,
-            "action_advice": report.action_advice,
-            "indicators":  report.indicators,
-        })
+        # Hänge den finalen Report als echtes Findings-Objekt an die Liste an
+        final_finding = Findings(
+            agent=AgentType.ORCHESTRATOR, # Oder passendes Enum-Feld nutzen
+            input="Zusammenfassung aller Findings",
+            threat_sum=[f"Threat Score: {report.threat_score}", f"Level: {report.risk_level}"],
+            vulnerability_sum=[f"Vulnerability Score: {report.vulnerability_score}"] + report.indicators
+        )
+        state["findings"].append(final_finding)
 
-        # ── Konsolenausgabe ──────────────────────────────────────────────────
-        _print_report(report)
+        # ── Ausgabe im Terminal ──────────────────────────────────────────────
+        self._print_custom_report(report)
 
         return state
 
+    def _print_custom_report(self, report: OutputReport) -> None:
+        """Übersichtliche und detaillierte Konsolenausgabe des neuen Reports."""
+        level_icons = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨"}
+        icon = level_icons.get(report.risk_level, "⚪")
 
-def _print_report(report: OutputReport) -> None:
-    """Übersichtliche Konsolenausgabe des finalen Reports."""
-    level_icons = {
-        "LOW":      "🟢",
-        "MEDIUM":   "🟡",
-        "HIGH":     "🔴",
-        "CRITICAL": "🚨",
-    }
-    icon = level_icons.get(report.risk_level, "⚪")
-
-    print("\n" + "═" * 60)
-    print(f"  {icon}  OSINT-Argus Risikobericht")
-    print("═" * 60)
-    print(f"  Risiko-Score : {report.risk_score}/100  [{report.risk_level}]")
-    print(f"  Zusammenfassung:\n    {report.summary}")
-    print(f"\n  🎯 Empfehlung:\n    {report.action_advice}")
-    print(f"\n  ⚠️  Indikatoren:")
-    for ind in report.indicators:
-        print(f"     • {ind}")
-    print("═" * 60 + "\n")
+        print("\n" + "═" * 60)
+        print(f"  {icon}  OSINT-ARGUS FINALER RISIKOBERICHT  {icon}")
+        print("═" * 60)
+        print(f"  Bedrohungs-Score (Threat)      : {report.threat_score}/100")
+        print(f"  Schwachstellen-Score (Vuln)    : {report.vulnerability_score}/100")
+        print(f"  Gesamteinstufung                : [{report.risk_level}]")
+        print("-" * 60)
+        print(f"  Zusammenfassung (Laie):\n  {report.summary}")
+        print("-" * 60)
+        print(f"  🚨 WICHTIG - UNBEDINGT VERMEIDEN:\n  {report.action_prevent}")
+        print("-" * 60)
+        print(f"  🔥 FALLS DU BEREITS GEKLICKT HAST:")
+        for i, step in enumerate(report.action_incident_response, 1):
+            print(f"    {step}")
+        print("-" * 60)
+        print(f"  💡 Haupt-Risikoindikatoren:")
+        for ind in report.indicators:
+            print(f"     • {ind}")
+        print("═" * 60 + "\n")

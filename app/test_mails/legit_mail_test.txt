@@ -1,0 +1,23 @@
+From: newsletter@mailchimp-delivery.com
+To: max.mustermann@gmail.com
+Subject: Ihre monatliche Zusammenfassung — Dezember 2025
+Reply-To: newsletter@mailchimp-delivery.com
+Date: Mon, 25 May 2026 08:00:00 +0000
+
+Hallo Max,
+
+hier ist Ihre monatliche Zusammenfassung von Ihren abonnierten Newslettern.
+
+Ihre Abonnements im Überblick:
+- Tech-Updates: https://techcrunch.com/newsletters
+- Sicherheitsnews: https://krebs on security.com/updates
+- Cloud-Neuigkeiten: https://aws.amazon.com/de/newsletters/
+
+Um sich abzumelden, klicken Sie hier:
+https://mailchimp-delivery.com/unsubscribe?id=mm123&list=monthly
+
+Bei Fragen besuchen Sie unsere Hilfeseite:
+https://mailchimp.com/help
+
+Mit freundlichen Grüßen,
+Ihr Newsletter-Team

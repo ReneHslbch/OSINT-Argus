@@ -1,10 +1,16 @@
 import sys
-from pprint import pprint
+
 from app.graph import graph
-from app.tools.classifier import classify_input
 
 
-def read_multiline_input() -> str:
+def read_input() -> str:
+    if not sys.stdin.isatty():
+        return sys.stdin.buffer.read().decode(
+            "utf-8",
+            errors="replace"
+        ).strip()
+
+    print("📝 Eingabe (leere Zeile zum Abschließen):")
     lines = []
     while True:
         try:
@@ -13,14 +19,11 @@ def read_multiline_input() -> str:
                 break
             lines.append(line)
         except EOFError:
-            # Pipe-Modus: alles auf einmal lesen
             break
     return "\n".join(lines).strip()
 
-
 def main():
-    print("📝 Eingabe (leere Zeile zum Abschließen):\n")
-    user_input = read_multiline_input()
+    user_input = read_input()
 
     if not user_input:
         print("❌ Kein Input erhalten.")
@@ -28,35 +31,33 @@ def main():
 
     print(f"\n📨 Input empfangen ({len(user_input.splitlines())} Zeilen)\n")
 
+    # Der absolut minimale Start-State. 
+    # Alles andere baut der InputAgent oder Orchestrator dynamisch auf.
     state = {
         "user_input":       user_input,
-        "input_type":       classify_input(user_input),
-        "current_agent":    "orchestrator",
+        "input_type":       "unknown", # Wird vom InputAgent überschrieben
+        "current_agent":    "input",
         "next_agent":       "",
         "findings":         [],
         "risk_score":       None,
         "summary":          None,
         "memory_context":   None,
-        "email_pass":       0,
-        "domains_to_scan":  [],
-        "domains_scanned":  [],
-        "current_domain":   None,
-        "email_extraction": None,
+        "to_scan":          [],
+        "scanned":          [],
+        "current_check":    None
     }
 
     try:
+        # LangGraph Pipeline starten
         result = graph.invoke(state)
-        pprint(result)
+        print("🏁 Pipeline erfolgreich beendet!")
     except Exception as e:
         print(f"\n❌ Fehler: {type(e).__name__}: {e}")
-        print("   → Tipp: SAIA API manchmal langsam, nochmal versuchen.")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     print("╔══════════════════════════════════════════════╗")
     print("║       👁️  OSINT-Argus Multi-Agent            ║")
     print("║     DomainAgent · EmailAgent · CVEAgent      ║")
-    print("║          RAG Memory · LangGraph              ║")
     print("╚══════════════════════════════════════════════╝\n")
     main()

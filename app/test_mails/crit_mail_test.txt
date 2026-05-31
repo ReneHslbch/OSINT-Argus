@@ -1,0 +1,26 @@
+From: sicherheit@deutsche-bank-verify.com
+To: max.mustermann@gmail.com
+Subject: [DRINGEND] Ungewöhnliche Kontoaktivität festgestellt — Sofortiger Handlungsbedarf
+Reply-To: no-reply@db-security-alert.ru
+Date: Mon, 25 May 2026 03:47:22 +0000
+
+Sehr geehrter Deutsche Bank Kunde,
+
+wir haben verdächtige Aktivitäten in Ihrem Online-Banking-Konto 
+festgestellt. Ihr Konto wurde vorübergehend eingeschränkt.
+
+Um Ihr Konto zu entsperren, müssen Sie Ihre Identität bestätigen:
+
+SCHRITT 1 — Identität verifizieren:
+https://deutsche-bank-verify.com/auth/verify?session=a8f3kX92mP
+
+SCHRITT 2 — TAN eingeben unter:
+https://db-secure-login.net/tan-verify
+
+Bei Problemen mit dem Link:
+https://www.deutsche-bank.de/hilfe
+
+Bitte antworten Sie NICHT auf diese E-Mail.
+Ihr Sicherheitsteam der Deutschen Bank
+
+[Diese E-Mail wurde automatisch generiert]

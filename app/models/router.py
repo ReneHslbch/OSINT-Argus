@@ -2,6 +2,24 @@ from pydantic import BaseModel, Field
 from typing import List, Literal, Optional
 
 
+class OrchestratorDecision(BaseModel):
+    next_agent: Literal["domain", "email", "cve", "output"] = Field(
+        description="Welcher Sub-Agent als nächstes ausgeführt werden soll. 'output' wählen, wenn alles gescannt wurde ODER die Befunde für ein Urteil ausreichen."
+    )
+    current_check: str | None = Field(
+        None,
+        description=(
+            "Das EXAKTE Element aus der offenen Liste, das JETZT die höchste Priorität hat und geprüft werden soll. "
+            "Setze NULL, wenn next_agent='output'."
+        )
+    )
+    relevant_targets_remaining: List[str] = Field(
+        description="Die bereinigte Liste der verbleibenden Targets, die NOCH wichtig sind. Du DARFST Duplikate, Markdown-Müll oder unwichtige Zeilen hier einfach RAUSWERFEN."
+    )
+    reasoning: str = Field(
+        description="Strategische Begründung, warum dieses spezifische Element Priorität hat oder warum du adaptiv abbrichst."
+    )
+
 # ── Sprint 1: Initiales Routing ──────────────────────────────────────────────
 class RouteDecision(BaseModel):
     input_type: Literal["domain", "email", "url", "unknown"] = Field(
@@ -32,34 +50,32 @@ class EmailPipelineDecision(BaseModel):
     )
     
 # ── Sprint 2 Part 2: Finaler Risikobericht ────────────────────────────────────
+
 class OutputReport(BaseModel):
-    risk_score: int = Field(
-        description="Gesamtrisiko-Score von 0 (kein Risiko) bis 100 (kritisches Risiko)",
-        ge=0,
-        le=100,
+    threat_score: int = Field(
+        description="Bedrohungs-Score von 0 (keine aktive Bedrohung) bis 100 (aktive, bösartige Kampagne/Angreifer)",
+        ge=0, le=100
+    )
+    vulnerability_score: int = Field(
+        description="Schwachstellen-Score von 0 (perfekt gehärtet) bis 100 (kritische, offen liegende Sicherheitslücken)",
+        ge=0, le=100
     )
     risk_level: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = Field(
-        description=(
-            "Risikostufe abgeleitet vom Score: "
-            "LOW=0-33 (grün), MEDIUM=34-66 (gelb), HIGH=67-84 (rot), CRITICAL=85-100 (rot🚨)"
-        )
+        description="Gesamteinstufung basierend auf der Kombination von Bedrohung und Schwachstelle."
     )
     explanation: str = Field(
-        description="Technische Erklärung der Befunde (3–5 Sätze, für Experten)"
+        description="Technische Erklärung der Befunde (3–5 Sätze, für Experten)."
     )
     summary: str = Field(
-        description="Einfache Zusammenfassung für Laien ohne Fachjargon (2–3 Sätze)"
+        description="Einfache Zusammenfassung für Laien ohne Fachjargon (2–3 Sätze)."
     )
-    action_advice: str = Field(
-        description=(
-            "Konkreter, handlungsanleitender Ratschlag was der Nutzer jetzt tun soll. "
-            "Spezifisch für den Eingabetyp (Domain / E-Mail). "
-            "Beispiele: 'Keine Aktion erforderlich.' / 'Klicke den Link nicht direkt an.' / "
-            "'Besuche diese Domain nicht und lösche die E-Mail.'"
-        )
+    action_prevent: str = Field(
+        description="Präventiver Ratschlag, um Schaden zu verhindern (z.B. 'Auf keinen Fall auf die Links klicken, da...')."
+    )
+    action_incident_response: List[str] = Field(
+        description="Schritt-für-Schritt-Anleitung (chronologische Liste), falls der Nutzer bereits geklickt/reagiert hat (z.B. 1. Netzwerk trennen, 2. PW ändern)."
     )
     indicators: List[str] = Field(
-        description="Die 3–5 wichtigsten Risikoindikatoren als kurze Stichpunkte",
-        min_length=0,
-        max_length=10,
+        description="Die wichtigsten Risikoindikatoren als kurze Stichpunkte (max 10)",
+        max_length=10
     )
