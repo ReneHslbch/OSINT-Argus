@@ -3,7 +3,7 @@ from typing import List, Literal, Optional
 
 
 class OrchestratorDecision(BaseModel):
-    next_agent: Literal["domain", "email", "cve", "output"] = Field(
+    next_agent: Literal["domain", "email", "cve", "phone","output"] = Field(
         description="Welcher Sub-Agent als nächstes ausgeführt werden soll. 'output' wählen, wenn alles gescannt wurde ODER die Befunde für ein Urteil ausreichen."
     )
     current_check: str | None = Field(

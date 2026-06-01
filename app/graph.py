@@ -1,6 +1,7 @@
 from langgraph.graph import StateGraph, END
 from app.agents.cve_agent import CVEAgent
 from app.agents.output_agent import OutputAgent
+from app.agents.phone_agent import PhoneAgent
 from app.state import ArgusState
 from app.agents.orchestrator_agent import OrchestratorAgent
 from app.agents.domain_agent import DomainAgent
@@ -13,6 +14,7 @@ email_agent   = EmailAgent()
 output_agent = OutputAgent()
 input_agent = InputAgent()
 cve_agent = CVEAgent()
+phone_agent = PhoneAgent()
 
 builder = StateGraph(ArgusState)
 
@@ -23,6 +25,7 @@ builder.add_node("email",        email_agent.run)
 builder.add_node("output",        output_agent.run)
 builder.add_node("cve", cve_agent.run)
 builder.add_node ("input", input_agent.run)
+builder.add_node("phone", phone_agent.run)
 # ── Entry ──────────────────────────────────────────────────────────────────
 builder.set_entry_point("input")
 
@@ -34,7 +37,8 @@ builder.add_conditional_edges(
         "domain": "domain",
         "email":  "email",
         "cve":    "cve",       
-        "output": "output",       
+        "output": "output",   
+        "phone": "phone",    
     },
 )
 
@@ -44,5 +48,6 @@ builder.add_edge("email",  "orchestrator")
 builder.add_edge("cve",  "orchestrator")
 builder.add_edge("output", END)
 builder.add_edge("input", "orchestrator")
+builder.add_edge("phone", "orchestrator")
 
 graph = builder.compile()

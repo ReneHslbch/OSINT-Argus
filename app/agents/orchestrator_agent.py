@@ -57,6 +57,7 @@ class OrchestratorAgent(BaseAgent):
         - 'domain': Für Domainnamen, URLs oder IP-Adressen.
         - 'email': Für E-Mail-Adressen oder rohe Mail-Inhalte.
         - 'cve': Für Software-Technologien und Versionen (z.B. 'nginx 1.18.0').
+        - 'phone': Für Handy-/Telefonnummer.
         - 'output': Für den finalen Bericht."""
 
         user_content = f"""

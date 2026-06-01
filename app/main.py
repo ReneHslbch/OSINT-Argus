@@ -1,25 +1,30 @@
 import sys
-
 from app.graph import graph
 
-
 def read_input() -> str:
+    # 1. Fall: Automatisierter Stream (z.B. Get-Content ... | python -m app.main)
     if not sys.stdin.isatty():
         return sys.stdin.buffer.read().decode(
             "utf-8",
             errors="replace"
         ).strip()
 
-    print("📝 Eingabe (leere Zeile zum Abschließen):")
+    # 2. Fall: Interaktive Konsole / Reinkopieren
+    print("📝 Eingabe (Ganze Mail reinkopieren und mit einer leeren Zeile/Enter abschließen):")
     lines = []
     while True:
         try:
             line = input()
-            if line == "" and lines:
+            # Sobald EINE leere Zeile kommt, brechen wir sofort ab
+            if line.strip() == "":
                 break
             lines.append(line)
         except EOFError:
             break
+        except KeyboardInterrupt:
+            print("\n👋 Scan abgebrochen.")
+            sys.exit(0)
+            
     return "\n".join(lines).strip()
 
 def main():
@@ -57,7 +62,7 @@ def main():
 
 if __name__ == "__main__":
     print("╔══════════════════════════════════════════════╗")
-    print("║       👁️  OSINT-Argus Multi-Agent            ║")
+    print("║        👁️  OSINT-Argus Multi-Agent            ║")
     print("║     DomainAgent · EmailAgent · CVEAgent      ║")
     print("╚══════════════════════════════════════════════╝\n")
     main()
