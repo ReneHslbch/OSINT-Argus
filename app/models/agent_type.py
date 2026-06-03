@@ -9,3 +9,4 @@ class AgentType(str, Enum):
     PHONE = "phone"  
     OUTPUT = "output"
     FILE = "file"
+    IDENTITY = "identity"

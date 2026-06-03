@@ -9,6 +9,7 @@ class OrchestratorDecision(BaseModel):
         "cve",
         "phone",
         "file",
+        "identity",
         "output"
     ] = Field(
         description="""
@@ -23,47 +24,20 @@ class OrchestratorDecision(BaseModel):
     E-Mail-Adressen oder komplette E-Mail-Inhalte
 
     - cve:
-    Softwareprodukte, Technologien und Versionsangaben
-    (z.B. nginx 1.18, apache 2.4.58)
+    Softwareprodukte, Technologien und Versionsangaben (z.B. nginx 1.18)
 
     - phone:
     Telefon- oder Mobilnummern
 
     - file:
-    Dateien oder Datei-URLs.
+    Dateien, Datei-URLs oder kryptografische Datei-Hashes (MD5, SHA1, SHA256).
 
-    Beispiele:
-    report.pdf
-    invoice.docx
-    archive.zip
-    malware.exe
-    https://site.com/document.pdf
-    https://cdn.site.com/update.exe
-
-    Typische Endungen:
-    .pdf
-    .doc
-    .docx
-    .xls
-    .xlsx
-    .ppt
-    .pptx
-    .zip
-    .rar
-    .7z
-    .exe
-    .dll
-    .iso
-    .img
-    .bin
-    .apk
-
-    Wenn current_check eine Datei oder Datei-URL ist,
-    MUSS next_agent='file' gewählt werden.
+    - identity:
+    Klarnamen von Personen (z.B. 'Rene Haselbach'), Benutzernamen, Social-Media-Handles 
+    oder Entwickler-IDs, die aus Metadaten oder Texten extrahiert wurden.
 
     - output:
-    Wenn genügend Informationen vorliegen oder nichts
-    Relevantes mehr zu prüfen ist.
+    Wenn genügend Informationen vorliegen oder nichts Relevantes mehr zu prüfen ist.
     """
     )
     current_check: str | None = Field(
@@ -74,7 +48,7 @@ class OrchestratorDecision(BaseModel):
         )
     )
     relevant_targets_remaining: List[str] = Field(
-        description="Die bereinigte Liste der verbleibenden Targets, die NOCH wichtig sind. Du DARFST Duplikate, Markdown-Müll oder unwichtige Zeilen hier einfach RAUSWERFEN."
+        description="Die bereinigte Liste der verbleibenden Targets, die NOCH wichtig sind. Du DARFST Duplikate oder echten Müll rauswerfen. WICHTIG: Valide Namen oder Hashes dürfen NICHT gelöscht werden!"
     )
     reasoning: str = Field(
         description="Strategische Begründung, warum dieses spezifische Element Priorität hat oder warum du adaptiv abbrichst."

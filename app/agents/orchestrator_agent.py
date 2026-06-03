@@ -22,46 +22,43 @@ class OrchestratorAgent(BaseAgent):
         state["findings"].append(log_finding)
 
     def run(self, state: ArgusState) -> ArgusState:
-        # Listen initialisieren falls nötig
         if state.get("scanned") is None:
             state["scanned"] = []
         if state.get("findings") is None:
             state["findings"] = []
 
-        # ── 1. Update nach dem letzten Sub-Agenten-Lauf ──────────────────────
         last_checked = state.get("current_check")
         if last_checked and last_checked not in state["scanned"]:
             state["scanned"].append(last_checked)
             state["current_check"] = None
 
-        # Berechne die noch offenen Ziele als Hilfestellung für die Logs
         remaining = [item for item in state["to_scan"] if item not in state["scanned"]]
 
-        # Wenn absolut nichts mehr zu tun ist, direkt zum Output
         if not remaining and not state["to_scan"]:
             state["next_agent"] = "output"
             state["current_check"] = None
             return state
 
-        # ── 2. Adaptiver System Prompt für echtes Risiko-Priorisieren ────────
+        # Überarbeiteter, präziser Prompt:
         system_prompt = """Du bist der zentrale Orchestrator von OSINT-Argus.
-        Deine Aufgabe ist es, die Liste der Targets ('to_scan') ADAPTIV und INTELLIGENT abzuarbeiten.
-        Du musst NICHT alles stumpf scannen. Priorisiere nach Risiko!
+Deine Aufgabe ist es, die Liste der Targets ('to_scan') ADAPTIV und INTELLIGENT abzuarbeiten.
+Priorisiere nach Risiko und leite die Targets an die richtigen Spezialagenten weiter.
 
-        DEINE MÄCHTE:
-        1. Filtere Müll: Wenn im Input Textphrasen wie '][**Korrektur**...' oder Erklärungen stehen, wirf sie komplett raus, indem du sie NICHT in 'relevant_targets_remaining' aufnimmst.
-        2. Priorisiere Gefahr: Scanne eine verdächtige Typosquatting-Domain (z.B. mailchimp-delivery.com) IMMER vor bekannten, sauberen Cloud-Infrastrukturen (z.B. aws.amazon.com).
-        3. Adaptiver Abbruch: Wenn die bisherigen 'Findings' bereits kritisch genug sind (z.B. Domain existiert nicht, extrem hoher Phishing-Verdacht), darfst du den Scan sofort abbrechen! Wähle dann direkt 'output', um zum OutputAgent zu springen.
+VERFÜGBARE AGENTEN & ZIEL-ZUORDNUNG:
+- 'domain': Für Domainnamen, URLs oder IP-Adressen.
+- 'email': Für E-Mail-Adressen.
+- 'cve': Für Software-Technologien und Versionen (z.B. 'nginx 1.18.0').
+- 'phone': Für Handy-/Telefonnummern.
+- 'file': Für lokale Dateipfade, Dokumente, PDFs sowie Datei-Hashes (MD5, SHA256).
+- 'identity': Für extrahierte Klarnamen von Personen (z.B. 'Rene Haselbach'), Usernames oder Social-Media-Handles.
+- 'output': Für den finalen Bericht (wenn die Queue leer ist oder adaptiv abgebrochen wird).
 
-        Verfügbare Agenten:
-        - 'domain': Für Domainnamen, URLs oder IP-Adressen.
-        - 'email': Für E-Mail-Adressen oder rohe Mail-Inhalte.
-        - 'cve': Für Software-Technologien und Versionen (z.B. 'nginx 1.18.0').
-        - 'phone': Für Handy-/Telefonnummer.
-        - 'output': Für den finalen Bericht.
-        - 'file': Für lokale Dateien, Dokumente, PDFs, Office-Dateien, Archive oder Download-URLs."""
+STRATEGISCHE QUEUE-REGELN:
+1. Wenn ein vorheriger Agent ein neues Target (wie z.B. einen Autorennahmen aus einer PDF) in die Target-Liste gelegt hat, musst du diesen zwingend beachten!
+2. Ein Personenname ist KEIN Müll. Setze ihn als 'current_check' und übergebe ihn an den 'identity'-Agenten.
+3. Behalte alle anderen noch nicht gescannten Targets unbedingt in der Liste 'relevant_targets_remaining' bei!
+"""
         
-
         user_content = f"""
         Gesamt-Input-Typ: {state.get('input_type')}
         Aktuelle Target-Liste (to_scan): {state['to_scan']}
@@ -74,24 +71,19 @@ class OrchestratorAgent(BaseAgent):
         Bestimme das nächste Ziel, filtere die verbleibende Queue und wähle den Agenten.
         """
 
-        # ── 3. LLM Entscheidung anfordern ─────────────────────────────────────
         decision: OrchestratorDecision = self.llm.invoke([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
         ])
 
-        # ── 4. State ADAPTIV updaten ──────────────────────────────────────────
         state["next_agent"] = decision.next_agent
         state["current_check"] = decision.current_check
 
-        # Hier passiert die Magie: Die Queue wird durch den KI-Filter ersetzt!
         new_queue = decision.relevant_targets_remaining
         if decision.current_check in new_queue:
             new_queue.remove(decision.current_check)
             
         state["to_scan"] = new_queue
-
-        # Logge die Entscheidung in die Findings-Liste
         self._log_decision(state, decision)
 
         print(f"\n🧠 [Orchestrator KI] Route zu: → {decision.next_agent} | Target: '{decision.current_check}'")

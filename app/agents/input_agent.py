@@ -6,11 +6,11 @@ from app.state import ArgusState
 from app.models.llm import get_llm
 
 class InputExtraction(BaseModel):
-    input_type: Literal["domain", "email", "url", "text", "phone", "unknown"] = Field(
+    input_type: Literal["domain", "email", "url", "text", "phone", "file", "identity", "unknown"] = Field(
         description="Der primäre Typ des empfangenen Gesamt-Inputs."
     )
     extracted_targets: List[str] = Field(
-        description="Liste aller extrahierten Entitäten, die gescannt werden müssen (E-Mail-Adressen, Domains, IPs, Handy-/Telefonnummern, Software-Namen wie 'nginx 1.18')."
+        description="Liste aller extrahierten Entitäten, die gescannt werden müssen (E-Mail-Adressen, Domains, IPs, Telefonnummern, Software-Namen, Identitäten, Hashes oder Dateipfade)."
     )
 
 class InputAgent(BaseAgent):
@@ -22,18 +22,26 @@ class InputAgent(BaseAgent):
         user_input = state["user_input"]
 
         system_prompt = """Du bist der InputAgent (Triage) von OSINT-Argus.
-Deine Aufgabe ist es, den rohen Benutzer-Input zu analysieren.
-1. Bestimme den globalen Typ des Inputs ('email', 'domain', 'url', 'text', 'handynummer').
-2. Extrahiere alle cyber-relevanten Targets, die einer tieferen Analyse unterzogen werden könnten:
-   - Wenn es eine E-Mail ist: Nimm den kompletten Mail-Inhalt als ein Target auf, extrahiere aber AUCH alle darin vorkommenden Links/Domains und verdächtige Absender-E-Mails.
-   - Wenn es ein Text-Snippet ist: Extrahiere IPs, Domains, Mail-Adressen, Handy-/Telefonnummern und Software-Zustände (z.B. 'Apache 2.4').
+Deine Aufgabe ist es, den rohen Benutzer-Input zu analysieren und strukturierte Angriffsziele (Targets) zu extrahieren.
 
-Sei gründlich. Jedes extrahierte Element landet in der 'to_scan'-Liste des Orchestrators."""
+1. Bestimme den globalen Typ des Inputs. Nutze strikt einen dieser Werte: 'domain', 'email', 'url', 'text', 'phone', 'file', 'identity', 'unknown'.
+
+2. Extrahiere alle cyber-relevanten Einzel-Targets für die 'to_scan'-Liste des Orchestrators:
+   - IPs, Domains, URLs, E-Mail-Adressen und Telefonnummern.
+   - Software-Zustände (z.B. 'nginx 1.18', 'Apache 2.4').
+   - Krypto-Hashes (MD5, SHA1, SHA256) und vollständige lokale Dateipfade (z.B. 'C:\\Ordner\\datei.pdf' oder '/var/log/syslog').
+
+WICHTIGE EXTRAKTIONS-REGELN:
+- Extrahiere NUR den nackten, bereinigten Wert der Entität.
+- Füge NIEMALS erklärenden Text, Labels oder Beschreibungen in ein Target ein. 
+  * Falsch: "MD5-Hash (Datei-Indikator)" oder "SHA256: e3b0c4..."
+  * Richtig: "e3b0c4..." (nur der Hash selbst)
+- Wenn der Input eine E-Mail oder ein längerer Text ist, durchsuche den gesamten Text akribisch nach eingebetteten Hashes, IP-Adressen und Dateipfaden und nimm sie alle als separate, isolierte Elemente in die Liste auf."""
 
         # LLM aufrufen
         extraction: InputExtraction = self.llm.invoke([
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Analysiere folgenden Input:\n\n{user_input}"}
+            {"role": "user", "content": f"Analysiere folgenden Input und extrahiere alle Einzel-Targets sauber:\n\n{user_input}"}
         ])
 
         # State initialisieren und befüllen

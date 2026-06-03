@@ -103,9 +103,16 @@ VirusTotal-Ergebnisse:
                 vulnerability_sum=analysis.metadata_leaks,
             )
         )
-
+        # NEU: Wenn das LLM Identitäten (wie Autoren) extrahiert hat, füttern wir sie zurück in den State
+        if hasattr(analysis, "extracted_identities") and analysis.extracted_identities:
+            for identity in analysis.extracted_identities:
+                if identity not in state["to_scan"]:
+                    state["to_scan"].append(identity)
+                    print(f"🎯 [FileAgent] Neues Identitäts-Target entdeckt und registriert: {identity}")
+                    
         print(f"\n📄 [FileAgent] {clean_path}")
         print(f"⚠️ Risiko: {analysis.risk_level}")
         print(f"🧠 {analysis.reasoning}")
+
 
         return state
