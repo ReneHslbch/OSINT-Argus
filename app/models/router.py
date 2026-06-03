@@ -3,8 +3,68 @@ from typing import List, Literal, Optional
 
 
 class OrchestratorDecision(BaseModel):
-    next_agent: Literal["domain", "email", "cve", "phone","output"] = Field(
-        description="Welcher Sub-Agent als nächstes ausgeführt werden soll. 'output' wählen, wenn alles gescannt wurde ODER die Befunde für ein Urteil ausreichen."
+    next_agent: Literal[
+        "domain",
+        "email",
+        "cve",
+        "phone",
+        "file",
+        "output"
+    ] = Field(
+        description="""
+    Welcher Agent als nächstes ausgeführt werden soll.
+
+    Routing-Regeln:
+
+    - domain:
+    Domains, URLs, Hostnamen, IP-Adressen
+
+    - email:
+    E-Mail-Adressen oder komplette E-Mail-Inhalte
+
+    - cve:
+    Softwareprodukte, Technologien und Versionsangaben
+    (z.B. nginx 1.18, apache 2.4.58)
+
+    - phone:
+    Telefon- oder Mobilnummern
+
+    - file:
+    Dateien oder Datei-URLs.
+
+    Beispiele:
+    report.pdf
+    invoice.docx
+    archive.zip
+    malware.exe
+    https://site.com/document.pdf
+    https://cdn.site.com/update.exe
+
+    Typische Endungen:
+    .pdf
+    .doc
+    .docx
+    .xls
+    .xlsx
+    .ppt
+    .pptx
+    .zip
+    .rar
+    .7z
+    .exe
+    .dll
+    .iso
+    .img
+    .bin
+    .apk
+
+    Wenn current_check eine Datei oder Datei-URL ist,
+    MUSS next_agent='file' gewählt werden.
+
+    - output:
+    Wenn genügend Informationen vorliegen oder nichts
+    Relevantes mehr zu prüfen ist.
+    """
     )
     current_check: str | None = Field(
         None,

@@ -57,8 +57,6 @@ def check_virustotal_email_domain(email_or_domain: str) -> dict:
     except Exception as e:
         return {"error": str(e), "verdict": "UNKNOWN"}
 
-EMAIL_TOOLS = [check_virustotal_email_domain]
-
 @tool
 def check_phishing_blacklist(target: str) -> dict:
     """

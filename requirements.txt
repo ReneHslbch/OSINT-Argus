@@ -13,3 +13,5 @@ langchain-classic
 certifi
 httpx
 phonenumbers
+pypdf
+pyexiftool

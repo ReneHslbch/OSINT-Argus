@@ -8,3 +8,4 @@ class AgentType(str, Enum):
     CVE = "cve"
     PHONE = "phone"  
     OUTPUT = "output"
+    FILE = "file"

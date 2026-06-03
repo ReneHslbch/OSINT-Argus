@@ -58,7 +58,9 @@ class OrchestratorAgent(BaseAgent):
         - 'email': Für E-Mail-Adressen oder rohe Mail-Inhalte.
         - 'cve': Für Software-Technologien und Versionen (z.B. 'nginx 1.18.0').
         - 'phone': Für Handy-/Telefonnummer.
-        - 'output': Für den finalen Bericht."""
+        - 'output': Für den finalen Bericht.
+        - 'file': Für lokale Dateien, Dokumente, PDFs, Office-Dateien, Archive oder Download-URLs."""
+        
 
         user_content = f"""
         Gesamt-Input-Typ: {state.get('input_type')}

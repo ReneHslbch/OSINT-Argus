@@ -49,7 +49,9 @@ def main():
         "memory_context":   None,
         "to_scan":          [],
         "scanned":          [],
-        "current_check":    None
+        "current_check":    None,
+        "file_paths": [],
+        "file_hashes": []
     }
 
     try:

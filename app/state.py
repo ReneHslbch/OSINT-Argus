@@ -12,4 +12,6 @@ class ArgusState(TypedDict):
     memory_context: Optional[str]
     to_scan: List[str]             
     scanned: List[str]            
-    current_check: Optional[str]        
+    current_check: Optional[str]    
+    file_paths: List[str]
+    file_hashes: List[str]      
