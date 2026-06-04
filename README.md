@@ -198,47 +198,90 @@ The central coordinator. Called after every specialist agent run. Uses `with_str
 
 ---
 
-### `DomainAgent` — Full Domain OSINT Analysis
+### DomainAgent — Domain OSINT & Exposure Analysis
+
 **File:** `app/agents/domain_agent.py`
 
-Built on a **LangChain `AgentExecutor`** with `create_tool_calling_agent`. Reads `state["current_check"]` as the target domain.
+Built on a LangChain `AgentExecutor` using `create_tool_calling_agent`.
 
-**Mandatory execution order (enforced via system prompt):**
-1. `run_whois` → domain age, registrar, expiry
-2. `run_dns_lookup` → A, MX, NS records
-3. `run_crtsh` → subdomain enumeration via Certificate Transparency
-4. `run_urlhaus` → malware database check (abuse.ch)
-5. `run_spf_dmarc_check` → email security posture (SPF, DMARC, DKIM)
-6. `run_ssl_check` → TLS certificate validity and expiry
+The agent receives the current target from `state["current_check"]` and uses the tools provided through `DOMAIN_TOOLS` to perform OSINT-based domain reconnaissance.
 
-After all tools have run, the LLM produces a structured JSON finding:
+The analysis focuses on:
+
+* Public DNS and domain intelligence
+* WHOIS information (if supported by the available tools)
+* SSL/TLS certificate assessment
+* Email security posture (SPF, DMARC, DKIM)
+* Malware and reputation checks (e.g. URLhaus)
+* Discovery of subdomains
+* Detection of web technologies and software versions
+
+Unlike earlier implementations, tool execution order is **not hard-coded**. The LLM dynamically decides which tools to call through LangChain's tool-calling agent framework.
+
+The agent is instructed to produce a structured JSON result:
 
 ```json
 {
-  "threat_indicators": ["..."],
-  "exposure_findings": ["..."],
-  "summary": "2–3 sentence overall assessment"
+  "threat_indicators": [
+    "Identified malware indicators or malicious infrastructure findings"
+  ],
+  "exposure_findings": [
+    "Misconfigurations, certificate issues, or other security weaknesses"
+  ],
+  "discovered_subdomains": [
+    "Newly identified subdomains"
+  ],
+  "discovered_technologies": [
+    "Detected technologies and versions"
+  ],
+  "summary": "Short German-language assessment of the domain."
 }
 ```
 
+Detected technologies can be forwarded into the system's scan queue (`state["to_scan"]`) for downstream CVE analysis.
+
 ---
 
-### `EmailAgent` — Phishing Analysis
+### EmailAgent — Email & Phishing Analysis
+
 **File:** `app/agents/email_agent.py`
 
-Analyses raw email content. Parses headers, extracts URLs and sender domains, detects Reply-To mismatches, and produces a phishing assessment using VirusTotal and LLM content analysis.
+Built on a LangChain `AgentExecutor` using `create_tool_calling_agent`.
 
----
+The agent receives the current target from `state["current_check"]` and supports two analysis modes.
 
-### `CVEAgent` — Software Vulnerability Lookup
-**File:** `app/agents/cve_agent.py`
+#### Reputation Analysis Mode
 
-Queries the **NVD NIST API v2** (`services.nvd.nist.gov/rest/json/cves/2.0`) for known CVEs matching the technology string in `current_check`. Falls back to a local mock database if the API is offline or rate-limited.
+If the target is an email address or domain, the agent may use tools from `EMAIL_TOOLS` such as:
 
-Reports:
-- CVE IDs with CVSS score and severity
-- Known attack vectors and exploit details
-- Technical risk summary
+* VirusTotal reputation checks
+* Phishing blacklist checks
+
+#### Content Analysis Mode
+
+If the target contains email message content, the agent performs an LLM-driven phishing assessment focused on:
+
+1. Authority & Scarcity indicators
+2. Impersonation quality
+3. Call-to-action anomalies
+4. Technical artefacts, encoding issues, and language inconsistencies
+
+The agent returns a structured JSON result:
+
+```json
+{
+  "threat_indicators": [
+    "Detected phishing indicators"
+  ],
+  "exposure_findings": [
+    "Technical findings such as blacklist entries or reputation issues"
+  ],
+  "summary": "Short German-language phishing assessment."
+}
+```
+
+The current implementation does not explicitly parse email headers, extract URLs, or detect Reply-To mismatches within the agent code itself. Such functionality depends on the tools available through `EMAIL_TOOLS`.
+
 
 ---
 
