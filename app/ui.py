@@ -1,6 +1,9 @@
+import json
+
 import streamlit as st
 import time
 from app.graph import graph
+from app.memory.chroma_memory import get_last_analyses
 
 st.set_page_config(
     page_title="OSINT-Argus",
@@ -84,25 +87,144 @@ def render_sidebar():
         st.markdown("## 👁️ OSINT-Argus")
         st.caption("Multi-Agent Cybersecurity Analyzer")
         st.divider()
-        history = st.session_state.get("history", [])
-        if history:
-            st.markdown("**Letzte Analysen**")
-            for entry in reversed(history[-8:]):
-                lvl  = entry.get("risk_level", "?")
-                icon = LEVEL_ICON.get(lvl, "⚪")
-                q    = entry.get("query", "–")[:38]
-                st.markdown(
-                    f'<div class="memory-card">'
-                    f'<div class="memory-q">{icon} {q}</div>'
-                    f'<div class="memory-lvl">{lvl} · Score {entry.get("score","?")}/100</div>'
-                    f'</div>', unsafe_allow_html=True,
-                )
+        
+        st.markdown("**Letzte Analysen (ChromaDB)**")
+        
+        # 1. Daten live aus der ChromaDB abfragen (die letzten 8 Analysen)
+        try:
+            db_entries = get_last_analyses(limit=8)
+        except Exception as e:
+            st.error("Fehler beim Laden der Historie")
+            db_entries = []
+            
+        if db_entries:
+            # Neueste Analysen ganz oben anzeigen
+            for entry in reversed(db_entries):
+                # ChromaDB speichert Dokumente als Strings. Wenn du dort JSON ablegst, extrahieren wir es:
+                try:
+                    # Versuche, den gespeicherten Inhalt als JSON zu parsen (falls strukturiert abgelegt)
+                    content_data = json.loads(entry["content"])
+                    lvl = content_data.get("risk_level", "UNKNOWN")
+                    score = content_data.get("score", "?")
+                except Exception:
+                    # Fallback, falls du flachen Text/Report in die DB schreibst
+                    lvl = "?"
+                    score = "?"
+                
+                # Icons und Query vorbereiten
+                icon = LEVEL_ICON.get(lvl, "⚪") if 'LEVEL_ICON' in globals() else "⚪"
+                query_text = entry["query"][:35]
+                timestamp = entry.get("timestamp", "").split(" ")[1] if " " in entry.get("timestamp", "") else ""
+                
+                # Beschriftung für den Button bauen (Zweizeilig durch Zeilenumbruch)
+                button_label = f"{icon} {query_text}\n{lvl} · Score {score}/100 · {timestamp}"
+                
+                # Einzigartiger Key für Streamlit, basierend auf der Chroma-ID
+                if st.button(button_label, key=f"hist_{entry['id']}", use_container_width=True):
+                    # Wenn der User klickt, laden wir die Daten in den Session-State
+                    st.session_state["active_report_query"] = entry["query"]
+                    st.session_state["active_report_content"] = entry["content"]
+                    st.rerun() # UI neu laden, um den alten Report im Hauptfenster zu rendern
+                    
         else:
-            st.caption("Noch keine Analysen in dieser Sitzung.")
+            st.caption("Noch keine Analysen in der Datenbank vorhanden.")
+            
         st.divider()
         st.caption("Agents: Input · Orchestrator · Domain · Email · CVE · Phone · File · Identity · Output")
 
+# ── NEU: WEICHE FÜR GELADENEN ARCHIV-REPORT ──────────────────────────────
+def check_archiv():
+    if "active_report_content" in st.session_state:
+        st.markdown(
+            '<div class="argus-header">'
+            '<span style="font-size:2.2rem">📜</span>'
+            '<div><p class="argus-title">Archivierter Befund</p>'
+            f'<p class="argus-sub">Eingabe: {st.session_state["active_report_query"][:80]}...</p></div>'
+            '</div>', unsafe_allow_html=True,
+        )
+        st.info("ℹ️ Sie betrachten eine historische Analyse aus der ChromaDB-Vektordatenbank.")
+        
+        try:
+            # Dekodiere den JSON-String aus ChromaDB
+            data = json.loads(st.session_state["active_report_content"])
+            
+            lvl = data.get("risk_level", "UNKNOWN")
+            score = data.get("score", 0)
+            summary = data.get("summary", "")
+            indicators = data.get("indicators", [])
+            prevent_text = data.get("action_prevent", "")
+            incident_steps = data.get("action_incident_response", [])
 
+            # 1. Scores & Badge anzeigen
+            col_ts, col_vs, col_lvl = st.columns([1, 1, 1])
+            with col_ts:
+                st.markdown("**Risiko-Score**")
+                color_t = LEVEL_COLOR.get(lvl, "#9ca3af")
+                st.markdown(
+                    f'<span style="font-size:2.2rem;font-weight:700">{score}</span>'
+                    f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
+                    f'{score_bar(score, color_t)}',
+                    unsafe_allow_html=True,
+                )
+            with col_vs:
+                st.markdown("**Datenquelle**")
+                st.markdown('<span style="font-size:1.5rem;font-weight:600;display:block;margin-top:8px;">ChromaDB Persistent</span>', unsafe_allow_html=True)
+            with col_lvl:
+                st.markdown("**Gesamteinstufung**")
+                st.markdown(level_badge(lvl), unsafe_allow_html=True)
+
+            # 2. Zusammenfassung
+            if summary:
+                st.markdown("---")
+                st.markdown("#### Zusammenfassung")
+                st.info(summary)
+
+            # 3. Indikatoren
+            if indicators:
+                st.markdown("#### 💡 Haupt-Risikoindikatoren")
+                cols = st.columns(3)
+                for i, ind in enumerate(indicators[:9]):
+                    clean = ind.replace("**", "").replace("`", "").strip("- ").strip()
+                    if not clean:
+                        continue
+                    with cols[i % 3]:
+                        st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
+
+            # 4. Handlungsempfehlungen
+            st.markdown("---")
+            st.markdown("#### Handlungsempfehlungen")
+            col_p, col_i = st.columns(2)
+            with col_p:
+                st.markdown("🚫 **Unbedingt vermeiden**")
+                st.markdown(
+                    f'<div class="action-box action-prevent">{prevent_text}</div>',
+                    unsafe_allow_html=True,
+                )
+            with col_i:
+                st.markdown("🔥 **Falls bereits geklickt**")
+                if incident_steps:
+                    incident_text = "<br>".join([f"{step}" if step.startswith(('1.', '2.', '3.', '4.')) else f"{idx+1}. {step}" for idx, step in enumerate(incident_steps)])
+                else:
+                    incident_text = "Keine spezifischen Incident-Response-Schritte hinterlegt."
+                st.markdown(
+                    f'<div class="action-box action-incident">{incident_text}</div>',
+                    unsafe_allow_html=True,
+                )
+
+        except Exception as e:
+            # Fallback, falls noch unstrukturierte Altdaten in ChromaDB liegen
+            st.warning("Das Format dieser alten Analyse ist unstrukturiert. Zeige Rohdaten an:")
+            st.text_area("Report Rohdaten", st.session_state["active_report_content"], height=350)
+
+        st.markdown("---")
+        if st.button("🔄 Neue Analyse starten", type="primary"):
+            del st.session_state["active_report_content"]
+            del st.session_state["active_report_query"]
+            st.rerun()
+            
+        return True # Beendet die Anzeige des Archivs erfolgreich
+
+    return False # Signalisiert main(), dass kein Archiv-Eintrag geladen ist
 # ── State builder ─────────────────────────────────────────────────────────────
 def build_initial_state(user_input: str) -> dict:
     return {
@@ -390,6 +512,8 @@ def render_results(result: dict):
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     render_sidebar()
+
+    if check_archiv(): return
 
     st.markdown(
         '<div class="argus-header">'

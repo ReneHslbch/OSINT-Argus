@@ -86,43 +86,43 @@ class OutputAgent(BaseAgent):
             )
 
         # ── State befüllen ───────────────────────────────────────────────────
-        # Mappe die Werte so in den State, wie dein System sie erwartet
-        state["risk_score"] = max(report.threat_score, report.vulnerability_score) # Kombinierter Richtwert
+        state["risk_score"] = max(report.threat_score, report.vulnerability_score) 
         state["risk_level"] = report.risk_level
         state["summary"] = report.summary
         state["action_advice"] = f"PRÄVENTION:\n{report.action_prevent}\n\nFALLS BEREITS GEKLICKT:\n" + "\n".join(report.action_incident_response)
 
         # Hänge den finalen Report als echtes Findings-Objekt an die Liste an
         final_finding = Findings(
-            agent=AgentType.ORCHESTRATOR, # Oder passendes Enum-Feld nutzen
+            agent=AgentType.ORCHESTRATOR, 
             input="Zusammenfassung aller Findings",
             threat_sum=[f"Threat Score: {report.threat_score}", f"Level: {report.risk_level}"],
             vulnerability_sum=[f"Vulnerability Score: {report.vulnerability_score}"] + report.indicators
         )
         state["findings"].append(final_finding)
 
-        report_content = f"""
-            Risk Level: {report.risk_level}
-            Threat Score: {report.threat_score}
-            Vulnerability Score: {report.vulnerability_score}
+        # ── NEU: Strukturiertes JSON für ChromaDB bauen ──────────────────────
+        # Wir packen alle wichtigen Metadaten direkt in das Dokument, damit 
+        # die Sidebar darauf zugreifen kann.
+        chroma_payload = {
+            "risk_level": report.risk_level,
+            "score": max(report.threat_score, report.vulnerability_score),
+            "summary": report.summary,
+            "indicators": report.indicators,
+            "action_prevent": report.action_prevent,
+            "action_incident_response": report.action_incident_response
+        }
 
-            Summary:
-            {report.summary}
-
-            Indicators:
-            {chr(10).join(report.indicators)}
-            """
-
+        # Als JSON-String serialisiert in die ChromaDB wegschreiben
         save_analysis(
-                query=state.get("user_input", ""),
-                content=report_content
-            )
+            query=state.get("user_input", ""),
+            content=json.dumps(chroma_payload, ensure_ascii=False)
+        )
 
         # ── Ausgabe im Terminal ──────────────────────────────────────────────
         self._print_custom_report(report)
 
         return state
-
+    
     def _print_custom_report(self, report: OutputReport) -> None:
         """Übersichtliche und detaillierte Konsolenausgabe des neuen Reports."""
         level_icons = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨"}

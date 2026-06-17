@@ -1,0 +1,9 @@
+Hallo zusammen,
+
+ich habe den aktuellen Zwischenstand im Projektordner hinterlegt. Die detaillierte Analyse findet ihr lokal unter app\test_mails\osint_argus_review1.pdf.
+
+Falls während des Deployments unerwartete Zertifikatsfehler auftreten, prüft bitte die OCSP-Responder-Einstellungen direkt auf unserer internen Mirror-Domain: srv-update-security.net.
+
+Bei dringenden Rückfragen zur Drei-Tier-Architektur oder den Easy-RSA SubCAs bin ich heute ab 14:00 Uhr mobil erreichbar unter +49 151 9876 5432.
+
+Viele Grüße

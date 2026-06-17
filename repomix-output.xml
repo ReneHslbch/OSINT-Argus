@@ -80,6 +80,7 @@ app/tools/leak_tools.py
 app/tools/phone_tools.py
 app/ui.py
 README.md
+requirements-lock.txt
 requirements.txt
 </directory_structure>
 
@@ -184,482 +185,139 @@ def check_hibp(email: str):
         }
 </file>
 
-<file path="app/ui.py">
-import streamlit as st
-import time
-from app.graph import graph
-from app.memory.chroma_memory import collection
-from app.memory.chroma_memory import get_last_analyses
-
-st.set_page_config(
-    page_title="OSINT-Argus",
-    page_icon="👁️",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-st.markdown("""
-<style>
-.argus-header {
-    display: flex; align-items: center; gap: 12px;
-    padding: 0.5rem 0 1.5rem 0;
-    border-bottom: 1px solid rgba(128,128,128,0.2);
-    margin-bottom: 1.5rem;
-}
-.argus-title { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
-.argus-sub   { font-size: 0.75rem; opacity: 0.45; margin: 0; letter-spacing: 0.05em; text-transform: uppercase; }
-
-.risk-badge { display: inline-block; padding: 5px 16px; border-radius: 999px; font-weight: 700; font-size: 0.9rem; letter-spacing: 0.05em; }
-.risk-LOW      { background: #d1fae5; color: #065f46; }
-.risk-MEDIUM   { background: #fef3c7; color: #92400e; }
-.risk-HIGH     { background: #fee2e2; color: #991b1b; }
-.risk-CRITICAL { background: #991b1b; color: #fff; animation: pulse 1.4s infinite; }
-.risk-UNKNOWN  { background: #e5e7eb; color: #374151; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.65} }
-
-.action-box { border-radius: 8px; padding: 1rem 1.2rem; font-size: 0.88rem; line-height: 1.75; }
-.action-prevent  { background: #fffbeb; border-left: 4px solid #f59e0b; color: #78350f; }
-.action-incident { background: #fff1f2; border-left: 4px solid #ef4444; color: #7f1d1d; }
-
-.live-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 5px 0; font-size: 0.83rem;
-    border-bottom: 1px solid rgba(128,128,128,0.1);
-}
-.live-agent  { font-weight: 600; min-width: 110px; }
-.live-target { font-family: monospace; opacity: 0.7; font-size: 0.78rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.live-status { margin-left: auto; font-size: 0.85rem; }
-
-.memory-card {
-    background: rgba(128,128,128,0.06); border: 1px solid rgba(128,128,128,0.12);
-    border-radius: 8px; padding: 0.55rem 0.85rem; margin-bottom: 0.45rem; font-size: 0.8rem;
-}
-.memory-q   { font-weight: 600; margin-bottom: 2px; }
-.memory-lvl { font-size: 0.7rem; opacity: 0.45; }
-
-.score-bar-wrap { height: 8px; border-radius: 4px; background: rgba(128,128,128,0.15); margin-top: 6px; }
-.score-bar-fill { height: 8px; border-radius: 4px; }
-
-.indicator-pill {
-    background: rgba(239,68,68,0.07); border: 1px solid rgba(239,68,68,0.2);
-    border-radius: 6px; padding: 6px 10px; font-size: 0.8rem; margin-bottom: 6px;
-}
-</style>
-""", unsafe_allow_html=True)
-
-LEVEL_ICON  = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨", "UNKNOWN": "⚪"}
-LEVEL_COLOR = {"LOW": "#10b981", "MEDIUM": "#f59e0b", "HIGH": "#ef4444", "CRITICAL": "#dc2626", "UNKNOWN": "#9ca3af"}
-AGENT_ICON  = {
-    "input": "📥", "orchestrator": "🧠", "domain": "🌐",
-    "email": "📧", "cve": "🛡️", "phone": "📞",
-    "file": "📄", "identity": "👤", "output": "📊",
-}
-
-def level_badge(level: str) -> str:
-    return f'<span class="risk-badge risk-{level}">{LEVEL_ICON.get(level,"⚪")} {level}</span>'
-
-def score_bar(score: int, color: str) -> str:
-    pct = max(4, min(100, int(score)))
-    return (
-        f'<div class="score-bar-wrap">'
-        f'<div class="score-bar-fill" style="width:{pct}%;background:{color}"></div>'
-        f'</div>'
-    )
-
-
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-def render_sidebar():
-    with st.sidebar:
-        st.markdown("## 👁️ OSINT-Argus")
-        st.caption("Multi-Agent Cybersecurity Analyzer")
-        st.divider()
-        history = st.session_state.get("history", [])
-        recent = get_last_analyses(limit=5)
-
-        if recent:
-            st.markdown("**Vorherige Analysen**")
-
-            for _, metadata, document in reversed(recent):
-
-                query = metadata.get("query", "Unbekannt")
-
-                st.markdown(
-                    f"""
-                    <div class="memory-card">
-                        <div class="memory-q">
-                            🧠 {query[:38]}
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-        else:
-            st.caption("Noch keine gespeicherten Analysen.")
-        st.divider()
-        st.caption("Agents: Input · Orchestrator · Domain · Email · CVE · Phone · File · Identity · Output")
-
-# ── State builder ─────────────────────────────────────────────────────────────
-def build_initial_state(user_input: str) -> dict:
-    return {
-        "user_input": user_input, "input_type": "unknown",
-        "current_agent": "input", "next_agent": "",
-        "findings": [], "risk_score": None, "summary": None,
-        "memory_context": None, "to_scan": [], "scanned": [],
-        "current_check": None, "file_paths": [], "file_hashes": [],
-    }
-
-
-# ── Live pipeline runner ──────────────────────────────────────────────────────
-def run_with_live_log(user_input: str):
-    state    = build_initial_state(user_input)
-    log_slot = st.empty()
-    log_rows = []   # (agent, target, done)
-    t0       = time.time()
-
-    def render_log():
-        rows_html = ""
-        for agent, target, done in log_rows[-14:]:
-            icon   = AGENT_ICON.get(agent, "⚙️")
-            status = "✅" if done else "⏳"
-            tgt    = target[:60] if target else ""
-            rows_html += (
-                f'<div class="live-row">'
-                f'<span style="font-size:1rem">{icon}</span>'
-                f'<span class="live-agent">{agent.upper()}</span>'
-                f'<span class="live-target">{tgt}</span>'
-                f'<span class="live-status">{status}</span>'
-                f'</div>'
-            )
-        elapsed = round(time.time() - t0, 1)
-        log_slot.markdown(
-            f'<div style="border:1px solid rgba(128,128,128,0.15);border-radius:10px;padding:1rem 1.2rem;margin:0.5rem 0">'
-            f'<div style="font-size:0.7rem;opacity:0.4;margin-bottom:0.6rem;letter-spacing:0.08em">AGENT PIPELINE · {elapsed}s</div>'
-            f'{rows_html}'
-            f'</div>', unsafe_allow_html=True,
-        )
-
-    # We accumulate ALL findings across stream chunks into one list
-    all_findings = []
-    final_state  = state.copy()
-
-    for chunk in graph.stream(state, stream_mode="updates"):
-        for node_name, node_state in chunk.items():
-            # Mark previous step done
-            if log_rows:
-                prev = log_rows[-1]
-                log_rows[-1] = (prev[0], prev[1], True)
-
-            target = node_state.get("current_check") or ""
-            log_rows.append((node_name, target, False))
-            render_log()
-
-            # Merge scalars
-            for key in ("risk_score", "risk_level", "summary", "action_advice",
-                        "input_type", "memory_context", "next_agent", "current_check"):
-                if node_state.get(key) is not None:
-                    final_state[key] = node_state[key]
-
-            # Accumulate findings (never overwrite, only extend)
-            if node_state.get("findings"):
-                all_findings.extend(node_state["findings"])
-
-            # Keep latest queue state
-            for key in ("to_scan", "scanned"):
-                if key in node_state:
-                    final_state[key] = node_state[key]
-
-    # Mark last step done
-    if log_rows:
-        prev = log_rows[-1]
-        log_rows[-1] = (prev[0], prev[1], True)
-    render_log()
-
-    final_state["findings"] = all_findings
-    return final_state
-
-
-# ── Helpers for extracting OutputAgent report from findings ───────────────────
-def extract_output_report(findings: list) -> dict:
-    """
-    OutputAgent appends a Findings object with:
-      threat_sum = ["Threat Score: 95", "Level: CRITICAL"]
-      vulnerability_sum = ["Vulnerability Score: 85", "indicator1", ...]
-    We parse those — because stream_mode="updates" only returns keys in
-    ArgusState TypedDict, and risk_level/risk_score are missing from it.
-    """
-    threat_score = vuln_score = None
-    risk_level   = None
-    indicators   = []
-
-    for f in findings:
-        agent_val  = str(getattr(getattr(f, "agent", ""), "value", ""))
-        threat_sum = getattr(f, "threat_sum", [])
-        vuln_sum   = getattr(f, "vulnerability_sum", [])
-
-        if agent_val != "orchestrator":
-            continue
-        if not any("Threat Score" in str(t) for t in threat_sum):
-            continue
-
-        for t in threat_sum:
-            s = str(t)
-            if "Threat Score" in s:
-                try: threat_score = int(s.split(":")[-1].strip())
-                except: pass
-            if "Level" in s:
-                try: risk_level = s.split(":")[-1].strip()
-                except: pass
-
-        for v in vuln_sum:
-            s = str(v)
-            if "Vulnerability Score" in s:
-                try: vuln_score = int(s.split(":")[-1].strip())
-                except: pass
-            else:
-                indicators.append(s)
-
-    return {
-        "threat_score": threat_score,
-        "vuln_score":   vuln_score,
-        "risk_level":   risk_level,
-        "indicators":   indicators,
-    }
-
-
-# ── Render results ────────────────────────────────────────────────────────────
-def render_results(result: dict):
-    findings   = result.get("findings") or []
-
-    # Extract everything from the OutputAgent findings object —
-    # stream_mode="updates" does NOT return risk_level/risk_score/summary/action_advice
-    # because they are missing from ArgusState TypedDict.
-    report = extract_output_report(findings)
-
-    threat_score = report["threat_score"] or 0
-    vuln_score   = report["vuln_score"]   or 0
-    risk_level   = report["risk_level"]   or result.get("risk_level") or "UNKNOWN"
-    risk_score   = max(threat_score, vuln_score)
-    indicators   = report["indicators"]
-
-    # summary and action_advice: try state first, then fall back to findings text
-    summary    = result.get("summary") or ""
-    action_adv = result.get("action_advice") or ""
-
-    st.markdown("---")
-
-    # ── Score row — use the REAL scores from OutputAgent ─────────────────────
-    col_ts, col_vs, col_lvl = st.columns([1, 1, 1])
-
-    with col_ts:
-        st.markdown("**Bedrohungs-Score**")
-        color_t = LEVEL_COLOR.get(risk_level, "#9ca3af")
-        st.markdown(
-            f'<span style="font-size:2.2rem;font-weight:700">{threat_score}</span>'
-            f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
-            f'{score_bar(threat_score, color_t)}',
-            unsafe_allow_html=True,
-        )
-    with col_vs:
-        st.markdown("**Schwachstellen-Score**")
-        st.markdown(
-            f'<span style="font-size:2.2rem;font-weight:700">{vuln_score}</span>'
-            f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
-            f'{score_bar(vuln_score, "#f59e0b")}',
-            unsafe_allow_html=True,
-        )
-    with col_lvl:
-        st.markdown("**Gesamteinstufung**")
-        st.markdown(level_badge(risk_level), unsafe_allow_html=True)
-        if risk_level == "CRITICAL":
-            st.error("Sofortiger Handlungsbedarf!")
-        elif risk_level == "HIGH":
-            st.warning("Erhöhtes Risiko — Vorsicht geboten.")
-        elif risk_level == "MEDIUM":
-            st.info("Moderates Risiko — aufmerksam bleiben.")
-        else:
-            st.success("Kein akutes Risiko erkannt.")
-
-    # ── Summary ───────────────────────────────────────────────────────────────
-    if summary:
-        st.markdown("---")
-        st.markdown("#### Zusammenfassung")
-        st.info(summary)
-
-    # ── Indicators ────────────────────────────────────────────────────────────
-    if indicators:
-        st.markdown("#### 💡 Haupt-Risikoindikatoren")
-        cols = st.columns(3)
-        for i, ind in enumerate(indicators[:9]):
-            clean = ind.replace("**", "").replace("`", "").strip("- ").strip()
-            if not clean:
-                continue
-            with cols[i % 3]:
-                st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
-
-    # ── Action advice ─────────────────────────────────────────────────────────
-    if action_adv:
-        st.markdown("---")
-        st.markdown("#### Handlungsempfehlungen")
-
-        # Split on the marker the OutputAgent uses
-        split_marker = "FALLS BEREITS GEKLICKT:"
-        if split_marker in action_adv:
-            parts = action_adv.split(split_marker, 1)
-            prevent_text  = parts[0].replace("PRÄVENTION:", "").strip()
-            incident_text = parts[1].strip()
-        else:
-            # OutputAgent sometimes uses newline-separated numbered lists without the marker
-            prevent_text  = action_adv.strip()
-            incident_text = ""
-
-        col_p, col_i = st.columns(2)
-        with col_p:
-            st.markdown("🚫 **Unbedingt vermeiden**")
-            # Render as markdown so bold/lists work
-            st.markdown(
-                f'<div class="action-box action-prevent">{prevent_text}</div>',
-                unsafe_allow_html=True,
-            )
-        with col_i:
-            if incident_text:
-                st.markdown("🔥 **Falls bereits geklickt**")
-                st.markdown(
-                    f'<div class="action-box action-incident">{incident_text}</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown("🔥 **Falls bereits geklickt**")
-                st.markdown(
-                    '<div class="action-box action-incident">'
-                    '1. Gerät sofort vom Netzwerk trennen.<br>'
-                    '2. Passwörter von einem sicheren Gerät ändern.<br>'
-                    '3. Bank / IT-Sicherheit kontaktieren.<br>'
-                    '4. Gerät auf Malware scannen.'
-                    '</div>',
-                    unsafe_allow_html=True,
-                )
-
-    # ── Agent findings detail ─────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("#### Agent-Findings (Detail)")
-
-    # Show only real agent findings — skip orchestrator routing logs and the output summary
-    display_findings = []
-    seen = set()
-    for f in findings:
-        agent_val = str(getattr(getattr(f, "agent", ""), "value", ""))
-        inp       = getattr(f, "input", "")
-        key       = (agent_val, inp)
-        if agent_val == "orchestrator":
-            continue
-        if key in seen:
-            continue
-        seen.add(key)
-        display_findings.append(f)
-
-    if not display_findings:
-        st.caption("Keine Detail-Findings vorhanden.")
-    else:
-        for f in display_findings:
-            agent_val  = str(getattr(getattr(f, "agent", ""), "value", "?"))
-            inp        = getattr(f, "input", "")
-            threats    = getattr(f, "threat_sum", [])
-            vulns      = getattr(f, "vulnerability_sum", [])
-            icon       = AGENT_ICON.get(agent_val, "⚙️")
-
-            with st.expander(f"{icon} {agent_val.upper()} — {inp[:60]}", expanded=False):
-                if threats:
-                    st.markdown("**🎯 Bedrohungen**")
-                    for t in threats:
-                        if str(t).strip():
-                            st.markdown(f"- {t}")
-                if vulns:
-                    st.markdown("**🔍 Schwachstellen / Befunde**")
-                    for v in vulns:
-                        if str(v).strip():
-                            st.markdown(f"- {v}")
-                if not threats and not vulns:
-                    st.caption("Keine Befunde.")
-
-
-# ── Main ──────────────────────────────────────────────────────────────────────
-def main():
-    render_sidebar()
-
-    st.markdown(
-        '<div class="argus-header">'
-        '<span style="font-size:2.2rem">👁️</span>'
-        '<div><p class="argus-title">OSINT-Argus</p>'
-        '<p class="argus-sub">Multi-Agent Cybersecurity Analyzer</p></div>'
-        '</div>', unsafe_allow_html=True,
-    )
-
-    col_input, col_help = st.columns([3, 1])
-    with col_input:
-        user_input = st.text_area(
-            "Input",
-            placeholder=(
-                "Domain          →  example.com\n"
-                "E-Mail-Adresse  →  user@domain.com\n"
-                "E-Mail-Inhalt   →  komplette Mail hier reinkopieren\n"
-                "Telefonnummer   →  +49 151 12345678\n"
-                "Dateipfad/Hash  →  /pfad/zur/datei.pdf"
-            ),
-            height=190,
-            label_visibility="collapsed",
-        )
-    with col_help:
-        st.markdown("**Unterstützte Inputs**")
-        for line in ["🌐 Domain / URL", "📧 E-Mail-Adresse", "📨 E-Mail-Inhalt",
-                     "📞 Telefonnummer", "📄 Datei / Hash", "🔎 Software + Version"]:
-            st.caption(line)
-
-    run_col, clear_col, _ = st.columns([1, 1, 4])
-    with run_col:
-        run_btn = st.button("🔍 Analysieren", type="primary", use_container_width=True)
-    with clear_col:
-        if st.button("✕ Leeren", use_container_width=True):
-            st.session_state.pop("last_result", None)
-            st.rerun()
-
-    if run_btn:
-        if not user_input or not user_input.strip():
-            st.warning("Bitte einen Input eingeben.")
-        else:
-            t0 = time.time()
-            try:
-                result  = run_with_live_log(user_input.strip())
-                elapsed = round(time.time() - t0, 1)
-                st.success(f"✅ Analyse abgeschlossen in {elapsed}s")
-            except Exception as e:
-                st.error(f"❌ Pipeline-Fehler: {type(e).__name__}: {e}")
-                st.stop()
-
-            if "history" not in st.session_state:
-                st.session_state["history"] = []
-            st.session_state["history"].append({
-                "query":      user_input.strip()[:60],
-                "risk_level": result.get("risk_level", "UNKNOWN"),
-                "score":      result.get("risk_score", 0),
-            })
-            st.session_state["last_result"] = result
-
-    if "last_result" in st.session_state:
-        render_results(st.session_state["last_result"])
-
-
-if __name__ == "__main__":
-    main()
-</file>
-
-<file path=".env.example">
-OPENAI_API_KEY=YOUR_KEY
-OPENAI_BASE_URL=https://chat-ai.academiccloud.de/v1
-MODEL_NAME=mistral-large-instruct
-
-VT_API_KEY=YOUR_KEY
-SHODAN_API_KEY=YOUR_KEY
-HIBP_API_KEY=YOUR_KEY
+<file path="requirements-lock.txt">
+aiohappyeyeballs==2.6.2
+aiohttp==3.14.1
+aiosignal==1.4.0
+altair==6.2.1
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.14.0
+attrs==26.1.0
+bcrypt==5.0.0
+blinker==1.9.0
+build==1.5.0
+cachetools==7.1.4
+certifi==2026.6.17
+charset-normalizer==3.4.7
+chromadb==1.5.9
+click==8.4.1
+colorama==0.4.6
+distro==1.9.0
+dnspython==2.8.0
+durationpy==0.10
+filelock==3.29.4
+flatbuffers==25.12.19
+frozenlist==1.8.0
+fsspec==2026.6.0
+gitdb==4.0.12
+GitPython==3.1.50
+googleapis-common-protos==1.75.0
+greenlet==3.5.1
+grpcio==1.81.1
+h11==0.16.0
+hf-xet==1.5.1
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+httpx-sse==0.4.3
+huggingface_hub==1.19.0
+idna==3.18
+importlib_resources==7.1.0
+itsdangerous==2.2.0
+Jinja2==3.1.6
+jiter==0.15.0
+jsonpatch==1.33
+jsonpointer==3.1.1
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+kubernetes==36.0.2
+langchain==1.3.9
+langchain-classic==1.0.8
+langchain-community==0.4.2
+langchain-core==1.4.7
+langchain-openai==1.3.2
+langchain-protocol==0.0.17
+langchain-text-splitters==1.1.2
+langgraph==1.2.5
+langgraph-checkpoint==4.1.1
+langgraph-prebuilt==1.1.0
+langgraph-sdk==0.4.2
+langsmith==0.8.16
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+mdurl==0.1.2
+mmh3==5.2.1
+multidict==6.7.1
+narwhals==2.22.1
+numpy==2.4.6
+oauthlib==3.3.1
+onnxruntime==1.27.0
+openai==2.42.0
+opentelemetry-api==1.42.1
+opentelemetry-exporter-otlp-proto-common==1.42.1
+opentelemetry-exporter-otlp-proto-grpc==1.42.1
+opentelemetry-proto==1.42.1
+opentelemetry-sdk==1.42.1
+opentelemetry-semantic-conventions==0.63b1
+orjson==3.11.9
+ormsgpack==1.12.2
+overrides==7.7.0
+packaging==26.2
+pandas==3.0.3
+phonenumbers==9.0.32
+pillow==12.2.0
+propcache==0.5.2
+protobuf==6.33.6
+pyarrow==24.0.0
+pybase64==1.4.3
+pydantic==2.13.4
+pydantic-settings==2.14.1
+pydantic_core==2.46.4
+pydeck==0.9.2
+PyExifTool==0.5.6
+Pygments==2.20.0
+pypdf==6.13.2
+PyPika==0.51.1
+pyproject_hooks==1.2.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+python-multipart==0.0.32
+python-whois==0.9.6
+PyYAML==6.0.3
+referencing==0.37.0
+regex==2026.5.9
+requests==2.34.2
+requests-oauthlib==2.0.0
+requests-toolbelt==1.0.0
+rich==15.0.0
+rpds-py==2026.5.1
+shellingham==1.5.4
+six==1.17.0
+smmap==5.0.3
+sniffio==1.3.1
+SQLAlchemy==2.0.51
+starlette==1.3.1
+streamlit==1.58.0
+tenacity==9.1.4
+tiktoken==0.13.0
+tokenizers==0.23.1
+toml==0.10.2
+tqdm==4.68.3
+typer==0.25.1
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+tzdata==2026.2
+urllib3==2.7.0
+uuid_utils==0.16.1
+uvicorn==0.49.0
+watchdog==6.0.0
+watchfiles==1.2.0
+websocket-client==1.9.0
+websockets==15.0.1
+xxhash==3.7.0
+yarl==1.24.2
+zstandard==0.25.0
 </file>
 
 <file path=".gitignore">
@@ -984,44 +642,51 @@ MODEL_NAME = os.getenv("MODEL_NAME")
 </file>
 
 <file path="app/memory/chroma_memory.py">
+# Ergänzung / Refactoring von app/memory/chroma_memory.py
 import chromadb
 import uuid
+import datetime
 
-ids=[str(uuid.uuid4())]
 client = chromadb.PersistentClient(path="./chroma_db")
 collection = client.get_or_create_collection("argus_memory")
 
-
-
 def save_analysis(query: str, content: str):
+    """
+    Speichert den Input (query) und die Ergebnisse/Zusammenfassung (content).
+    """
+    # Um Duplikate bei gleichem Input zu vermeiden oder historische Versionen zu erlauben,
+    # nutzen wir eine UUID als primäre ID und packen die Query in die Metadaten.
+    analysis_id = str(uuid.uuid4())
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     collection.add(
         documents=[content],
-        ids=[query],
-        metadatas=[{"query": query}],
+        ids=[analysis_id],
+        metadatas=[{
+            "query": query,
+            "timestamp": timestamp
+        }],
     )
 
-
-
-def search_memory(query: str):
-    results = collection.query(
-        query_texts=[query],
-        n_results=3,
-    )
-
-    return results
-
-def get_last_analyses(limit=5):
+def get_last_analyses(limit=10):
+    """
+    Holt die letzten Analysen sortiert nach Auftreten.
+    """
     data = collection.get()
+    if not data or not data["ids"]:
+        return []
 
     docs = []
-
-    for meta in zip(
-        data["ids"],
-        data["metadatas"],
-        data["documents"]
-    ):
-        docs.append(meta)
-
+    # Zusammenführen für einfachere UI-Iteration
+    for idx in range(len(data["ids"])):
+        docs.append({
+            "id": data["ids"][idx],
+            "query": data["metadatas"][idx].get("query", "Unbekannte Suche"),
+            "timestamp": data["metadatas"][idx].get("timestamp", ""),
+            "content": data["documents"][idx]
+        })
+    
+    # Optional nach Zeitstempel sortieren oder einfach die neuesten zurückgeben
     return docs[-limit:]
 </file>
 
@@ -1576,6 +1241,16 @@ PHONE_TOOLS = [
 ]
 </file>
 
+<file path=".env.example">
+OPENAI_API_KEY=YOUR_KEY
+OPENAI_BASE_URL=https://chat-ai.academiccloud.de/v1
+MODEL_NAME=mistral-large-instruct
+
+VT_API_KEY=YOUR_KEY
+SHODAN_API_KEY=YOUR_KEY
+HIBP_API_KEY=YOUR_KEY
+</file>
+
 <file path="app/agents/email_agent.py">
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate
@@ -1791,158 +1466,6 @@ VirusTotal-Ergebnisse:
 
 
         return state
-</file>
-
-<file path="app/agents/output_agent.py">
-import json
-from langchain_core.prompts import ChatPromptTemplate
-from app.agents.base_agent import BaseAgent
-from app.models.router import OutputReport
-from app.state import ArgusState
-from app.models.llm import get_llm
-from app.models.findings import Findings
-from app.models.agent_type import AgentType
-from app.memory.chroma_memory import save_analysis
-
-llm = get_llm()
-
-SYSTEM_PROMPT = """Du bist der OutputAgent von OSINT-Argus. Deine Aufgabe ist es, aus allen gesammelten Agenten-Findings einen finalen, nicht-deterministischen Cybersecurity-Risikobericht zu generieren.
-
-Analysiere die Findings aus zwei Blickwinkeln:
-1. Threat Score (0-100): Gibt es Anzeichen für aktive Angreifer, Phishing-Absichten, Malware (URLhaus) oder böswillige Absichten?
-2. Vulnerability Score (0-100): Gibt es offene Flanken? (Fehlendes SPF/DMARC, abgelaufenes SSL, bekannte Software-CVEs)?
-
-Leite daraus das risk_level ab:
-- LOW (Scores vorwiegend < 33)
-- MEDIUM (Scores vorwiegend 34-66)
-- HIGH (Scores vorwiegend 67-84)
-- CRITICAL (Scores vorwiegend 85-100 oder akuter Phishing/Malware-Befund)
-
-WICHTIG FÜR DIE HANDLUNGSANWEISUNGEN:
-- Formuliere in 'action_prevent' eine klare Warnung, was auf KEINEN Fall getan werden darf (z.B. 'Nicht auf Links klicken, da...').
-- Erstelle in 'action_incident_response' eine klare, chronologische 1., 2., 3.-Schritt-Anleitung für den Fall, DASS der Nutzer bereits auf den Link geklickt, die Datei geöffnet oder mit dem Absender interagiert hat.
-
-Regeln:
-- Tool-Fehler/Timeouts fließen NICHT negativ in die Scores ein.
-- Nutze nur explizit beobachtete Fakten aus den Findings. Erfinde nichts.
-"""
-
-def _format_findings_for_llm(state: ArgusState) -> str:
-    """Extrahiert Daten direkt aus den Attributen der neuen Findings-Dataclass."""
-    if not state.get("findings"):
-        return "Keine Findings vorhanden."
-        
-    lines = []
-    for f in state["findings"]:
-        # Bestimme den Namen des Agenten aus dem Enum oder String
-        agent_name = f.agent.value if hasattr(f.agent, "value") else str(f.agent)
-        
-        lines.append(
-            f"=== Finding von Agent: {agent_name} ===\n"
-            f"Prüfobjekt (Input): {f.input}\n"
-            f"Bedrohungen (Threats): {f.threat_sum}\n"
-            f"Schwachstellen (Vulnerabilities): {f.vulnerability_sum}\n"
-        )
-    return "\n".join(lines)
-
-
-class OutputAgent(BaseAgent):
-
-    def __init__(self):
-        # Nutzen des erweiterten Pydantic-Modells
-        self._llm = llm.with_structured_output(OutputReport)
-
-    def run(self, state: ArgusState) -> ArgusState:
-        input_type = state.get("input_type", "unknown")
-        findings_text = _format_findings_for_llm(state)
-
-        prompt_input = (
-            f"Eingabetyp des Systems: {input_type}\n\n"
-            f"=== ALLE AGENTEN FINDINGS ===\n{findings_text}\n\n"
-            f"Erstelle den finalen Risikobericht inklusive Vorbeugung und Incident-Response-Schritten."
-        )
-
-        try:
-            report: OutputReport = self._llm.invoke([
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": prompt_input},
-            ])
-        except Exception as e:
-            print(f"⚠️ OutputAgent: Structured output fehlgeschlagen — {e}")
-            # Fallback bei unerwarteten API- oder Parsingfehlern
-            report = OutputReport(
-                threat_score=50,
-                vulnerability_score=50,
-                risk_level="MEDIUM",
-                explanation="Der Bericht konnte aufgrund eines technischen Fehlers nicht generiert werden.",
-                summary="Automatische Berichterstellung fehlgeschlagen.",
-                action_prevent="Interagiere nicht mit den Objekten, bis eine manuelle Prüfung stattfand.",
-                action_incident_response=["1. System isolieren", "2. IT-Sicherheit kontaktieren"],
-                indicators=["Parsing-Fehler im OutputAgent"]
-            )
-
-        # ── State befüllen ───────────────────────────────────────────────────
-        # Mappe die Werte so in den State, wie dein System sie erwartet
-        state["risk_score"] = max(report.threat_score, report.vulnerability_score) # Kombinierter Richtwert
-        state["risk_level"] = report.risk_level
-        state["summary"] = report.summary
-        state["action_advice"] = f"PRÄVENTION:\n{report.action_prevent}\n\nFALLS BEREITS GEKLICKT:\n" + "\n".join(report.action_incident_response)
-
-        # Hänge den finalen Report als echtes Findings-Objekt an die Liste an
-        final_finding = Findings(
-            agent=AgentType.ORCHESTRATOR, # Oder passendes Enum-Feld nutzen
-            input="Zusammenfassung aller Findings",
-            threat_sum=[f"Threat Score: {report.threat_score}", f"Level: {report.risk_level}"],
-            vulnerability_sum=[f"Vulnerability Score: {report.vulnerability_score}"] + report.indicators
-        )
-        state["findings"].append(final_finding)
-
-        report_content = f"""
-            Risk Level: {report.risk_level}
-            Threat Score: {report.threat_score}
-            Vulnerability Score: {report.vulnerability_score}
-
-            Summary:
-            {report.summary}
-
-            Indicators:
-            {chr(10).join(report.indicators)}
-            """
-
-        save_analysis(
-                query=state.get("user_input", ""),
-                content=report_content
-            )
-
-        # ── Ausgabe im Terminal ──────────────────────────────────────────────
-        self._print_custom_report(report)
-
-        return state
-
-    def _print_custom_report(self, report: OutputReport) -> None:
-        """Übersichtliche und detaillierte Konsolenausgabe des neuen Reports."""
-        level_icons = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨"}
-        icon = level_icons.get(report.risk_level, "⚪")
-
-        print("\n" + "═" * 60)
-        print(f"  {icon}  OSINT-ARGUS FINALER RISIKOBERICHT  {icon}")
-        print("═" * 60)
-        print(f"  Bedrohungs-Score (Threat)      : {report.threat_score}/100")
-        print(f"  Schwachstellen-Score (Vuln)    : {report.vulnerability_score}/100")
-        print(f"  Gesamteinstufung                : [{report.risk_level}]")
-        print("-" * 60)
-        print(f"  Zusammenfassung (Laie):\n  {report.summary}")
-        print("-" * 60)
-        print(f"  🚨 WICHTIG - UNBEDINGT VERMEIDEN:\n  {report.action_prevent}")
-        print("-" * 60)
-        print(f"  🔥 FALLS DU BEREITS GEKLICKT HAST:")
-        for i, step in enumerate(report.action_incident_response, 1):
-            print(f"    {step}")
-        print("-" * 60)
-        print(f"  💡 Haupt-Risikoindikatoren:")
-        for ind in report.indicators:
-            print(f"     • {ind}")
-        print("═" * 60 + "\n")
 </file>
 
 <file path="app/tools/domain_tools.py">
@@ -2348,65 +1871,740 @@ DOMAIN_TOOLS = [
 ]
 </file>
 
-<file path="app/agents/input_agent.py">
+<file path="app/ui.py">
 import json
-from pydantic import BaseModel, Field
-from typing import Literal, List
+
+import streamlit as st
+import time
+from app.graph import graph
+from app.memory.chroma_memory import get_last_analyses
+
+st.set_page_config(
+    page_title="OSINT-Argus",
+    page_icon="👁️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown("""
+<style>
+.argus-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 0.5rem 0 1.5rem 0;
+    border-bottom: 1px solid rgba(128,128,128,0.2);
+    margin-bottom: 1.5rem;
+}
+.argus-title { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+.argus-sub   { font-size: 0.75rem; opacity: 0.45; margin: 0; letter-spacing: 0.05em; text-transform: uppercase; }
+
+.risk-badge { display: inline-block; padding: 5px 16px; border-radius: 999px; font-weight: 700; font-size: 0.9rem; letter-spacing: 0.05em; }
+.risk-LOW      { background: #d1fae5; color: #065f46; }
+.risk-MEDIUM   { background: #fef3c7; color: #92400e; }
+.risk-HIGH     { background: #fee2e2; color: #991b1b; }
+.risk-CRITICAL { background: #991b1b; color: #fff; animation: pulse 1.4s infinite; }
+.risk-UNKNOWN  { background: #e5e7eb; color: #374151; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.65} }
+
+.action-box { border-radius: 8px; padding: 1rem 1.2rem; font-size: 0.88rem; line-height: 1.75; }
+.action-prevent  { background: #fffbeb; border-left: 4px solid #f59e0b; color: #78350f; }
+.action-incident { background: #fff1f2; border-left: 4px solid #ef4444; color: #7f1d1d; }
+
+.live-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 0; font-size: 0.83rem;
+    border-bottom: 1px solid rgba(128,128,128,0.1);
+}
+.live-agent  { font-weight: 600; min-width: 110px; }
+.live-target { font-family: monospace; opacity: 0.7; font-size: 0.78rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-status { margin-left: auto; font-size: 0.85rem; }
+
+.memory-card {
+    background: rgba(128,128,128,0.06); border: 1px solid rgba(128,128,128,0.12);
+    border-radius: 8px; padding: 0.55rem 0.85rem; margin-bottom: 0.45rem; font-size: 0.8rem;
+}
+.memory-q   { font-weight: 600; margin-bottom: 2px; }
+.memory-lvl { font-size: 0.7rem; opacity: 0.45; }
+
+.score-bar-wrap { height: 8px; border-radius: 4px; background: rgba(128,128,128,0.15); margin-top: 6px; }
+.score-bar-fill { height: 8px; border-radius: 4px; }
+
+.indicator-pill {
+    background: rgba(239,68,68,0.07); border: 1px solid rgba(239,68,68,0.2);
+    border-radius: 6px; padding: 6px 10px; font-size: 0.8rem; margin-bottom: 6px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+LEVEL_ICON  = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨", "UNKNOWN": "⚪"}
+LEVEL_COLOR = {"LOW": "#10b981", "MEDIUM": "#f59e0b", "HIGH": "#ef4444", "CRITICAL": "#dc2626", "UNKNOWN": "#9ca3af"}
+AGENT_ICON  = {
+    "input": "📥", "orchestrator": "🧠", "domain": "🌐",
+    "email": "📧", "cve": "🛡️", "phone": "📞",
+    "file": "📄", "identity": "👤", "output": "📊",
+}
+
+def level_badge(level: str) -> str:
+    return f'<span class="risk-badge risk-{level}">{LEVEL_ICON.get(level,"⚪")} {level}</span>'
+
+def score_bar(score: int, color: str) -> str:
+    pct = max(4, min(100, int(score)))
+    return (
+        f'<div class="score-bar-wrap">'
+        f'<div class="score-bar-fill" style="width:{pct}%;background:{color}"></div>'
+        f'</div>'
+    )
+
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+def render_sidebar():
+    with st.sidebar:
+        st.markdown("## 👁️ OSINT-Argus")
+        st.caption("Multi-Agent Cybersecurity Analyzer")
+        st.divider()
+        
+        st.markdown("**Letzte Analysen (ChromaDB)**")
+        
+        # 1. Daten live aus der ChromaDB abfragen (die letzten 8 Analysen)
+        try:
+            db_entries = get_last_analyses(limit=8)
+        except Exception as e:
+            st.error("Fehler beim Laden der Historie")
+            db_entries = []
+            
+        if db_entries:
+            # Neueste Analysen ganz oben anzeigen
+            for entry in reversed(db_entries):
+                # ChromaDB speichert Dokumente als Strings. Wenn du dort JSON ablegst, extrahieren wir es:
+                try:
+                    # Versuche, den gespeicherten Inhalt als JSON zu parsen (falls strukturiert abgelegt)
+                    content_data = json.loads(entry["content"])
+                    lvl = content_data.get("risk_level", "UNKNOWN")
+                    score = content_data.get("score", "?")
+                except Exception:
+                    # Fallback, falls du flachen Text/Report in die DB schreibst
+                    lvl = "?"
+                    score = "?"
+                
+                # Icons und Query vorbereiten
+                icon = LEVEL_ICON.get(lvl, "⚪") if 'LEVEL_ICON' in globals() else "⚪"
+                query_text = entry["query"][:35]
+                timestamp = entry.get("timestamp", "").split(" ")[1] if " " in entry.get("timestamp", "") else ""
+                
+                # Beschriftung für den Button bauen (Zweizeilig durch Zeilenumbruch)
+                button_label = f"{icon} {query_text}\n{lvl} · Score {score}/100 · {timestamp}"
+                
+                # Einzigartiger Key für Streamlit, basierend auf der Chroma-ID
+                if st.button(button_label, key=f"hist_{entry['id']}", use_container_width=True):
+                    # Wenn der User klickt, laden wir die Daten in den Session-State
+                    st.session_state["active_report_query"] = entry["query"]
+                    st.session_state["active_report_content"] = entry["content"]
+                    st.rerun() # UI neu laden, um den alten Report im Hauptfenster zu rendern
+                    
+        else:
+            st.caption("Noch keine Analysen in der Datenbank vorhanden.")
+            
+        st.divider()
+        st.caption("Agents: Input · Orchestrator · Domain · Email · CVE · Phone · File · Identity · Output")
+
+# ── NEU: WEICHE FÜR GELADENEN ARCHIV-REPORT ──────────────────────────────
+def check_archiv():
+    if "active_report_content" in st.session_state:
+        st.markdown(
+            '<div class="argus-header">'
+            '<span style="font-size:2.2rem">📜</span>'
+            '<div><p class="argus-title">Archivierter Befund</p>'
+            f'<p class="argus-sub">Eingabe: {st.session_state["active_report_query"][:80]}...</p></div>'
+            '</div>', unsafe_allow_html=True,
+        )
+        st.info("ℹ️ Sie betrachten eine historische Analyse aus der ChromaDB-Vektordatenbank.")
+        
+        try:
+            # Dekodiere den JSON-String aus ChromaDB
+            data = json.loads(st.session_state["active_report_content"])
+            
+            lvl = data.get("risk_level", "UNKNOWN")
+            score = data.get("score", 0)
+            summary = data.get("summary", "")
+            indicators = data.get("indicators", [])
+            prevent_text = data.get("action_prevent", "")
+            incident_steps = data.get("action_incident_response", [])
+
+            # 1. Scores & Badge anzeigen
+            col_ts, col_vs, col_lvl = st.columns([1, 1, 1])
+            with col_ts:
+                st.markdown("**Risiko-Score**")
+                color_t = LEVEL_COLOR.get(lvl, "#9ca3af")
+                st.markdown(
+                    f'<span style="font-size:2.2rem;font-weight:700">{score}</span>'
+                    f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
+                    f'{score_bar(score, color_t)}',
+                    unsafe_allow_html=True,
+                )
+            with col_vs:
+                st.markdown("**Datenquelle**")
+                st.markdown('<span style="font-size:1.5rem;font-weight:600;display:block;margin-top:8px;">ChromaDB Persistent</span>', unsafe_allow_html=True)
+            with col_lvl:
+                st.markdown("**Gesamteinstufung**")
+                st.markdown(level_badge(lvl), unsafe_allow_html=True)
+
+            # 2. Zusammenfassung
+            if summary:
+                st.markdown("---")
+                st.markdown("#### Zusammenfassung")
+                st.info(summary)
+
+            # 3. Indikatoren
+            if indicators:
+                st.markdown("#### 💡 Haupt-Risikoindikatoren")
+                cols = st.columns(3)
+                for i, ind in enumerate(indicators[:9]):
+                    clean = ind.replace("**", "").replace("`", "").strip("- ").strip()
+                    if not clean:
+                        continue
+                    with cols[i % 3]:
+                        st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
+
+            # 4. Handlungsempfehlungen
+            st.markdown("---")
+            st.markdown("#### Handlungsempfehlungen")
+            col_p, col_i = st.columns(2)
+            with col_p:
+                st.markdown("🚫 **Unbedingt vermeiden**")
+                st.markdown(
+                    f'<div class="action-box action-prevent">{prevent_text}</div>',
+                    unsafe_allow_html=True,
+                )
+            with col_i:
+                st.markdown("🔥 **Falls bereits geklickt**")
+                if incident_steps:
+                    incident_text = "<br>".join([f"{step}" if step.startswith(('1.', '2.', '3.', '4.')) else f"{idx+1}. {step}" for idx, step in enumerate(incident_steps)])
+                else:
+                    incident_text = "Keine spezifischen Incident-Response-Schritte hinterlegt."
+                st.markdown(
+                    f'<div class="action-box action-incident">{incident_text}</div>',
+                    unsafe_allow_html=True,
+                )
+
+        except Exception as e:
+            # Fallback, falls noch unstrukturierte Altdaten in ChromaDB liegen
+            st.warning("Das Format dieser alten Analyse ist unstrukturiert. Zeige Rohdaten an:")
+            st.text_area("Report Rohdaten", st.session_state["active_report_content"], height=350)
+
+        st.markdown("---")
+        if st.button("🔄 Neue Analyse starten", type="primary"):
+            del st.session_state["active_report_content"]
+            del st.session_state["active_report_query"]
+            st.rerun()
+            
+        return True # Beendet die Anzeige des Archivs erfolgreich
+
+    return False # Signalisiert main(), dass kein Archiv-Eintrag geladen ist
+# ── State builder ─────────────────────────────────────────────────────────────
+def build_initial_state(user_input: str) -> dict:
+    return {
+        "user_input": user_input, "input_type": "unknown",
+        "current_agent": "input", "next_agent": "",
+        "findings": [], "risk_score": None, "summary": None,
+        "memory_context": None, "to_scan": [], "scanned": [],
+        "current_check": None, "file_paths": [], "file_hashes": [],
+    }
+
+
+# ── Live pipeline runner ──────────────────────────────────────────────────────
+def run_with_live_log(user_input: str):
+    state    = build_initial_state(user_input)
+    log_slot = st.empty()
+    log_rows = []   # (agent, target, done)
+    t0       = time.time()
+
+    def render_log():
+        rows_html = ""
+        for agent, target, done in log_rows[-14:]:
+            icon   = AGENT_ICON.get(agent, "⚙️")
+            status = "✅" if done else "⏳"
+            tgt    = target[:60] if target else ""
+            rows_html += (
+                f'<div class="live-row">'
+                f'<span style="font-size:1rem">{icon}</span>'
+                f'<span class="live-agent">{agent.upper()}</span>'
+                f'<span class="live-target">{tgt}</span>'
+                f'<span class="live-status">{status}</span>'
+                f'</div>'
+            )
+        elapsed = round(time.time() - t0, 1)
+        log_slot.markdown(
+            f'<div style="border:1px solid rgba(128,128,128,0.15);border-radius:10px;padding:1rem 1.2rem;margin:0.5rem 0">'
+            f'<div style="font-size:0.7rem;opacity:0.4;margin-bottom:0.6rem;letter-spacing:0.08em">AGENT PIPELINE · {elapsed}s</div>'
+            f'{rows_html}'
+            f'</div>', unsafe_allow_html=True,
+        )
+
+    # We accumulate ALL findings across stream chunks into one list
+    all_findings = []
+    final_state  = state.copy()
+
+    for chunk in graph.stream(state, stream_mode="updates"):
+        for node_name, node_state in chunk.items():
+            # Mark previous step done
+            if log_rows:
+                prev = log_rows[-1]
+                log_rows[-1] = (prev[0], prev[1], True)
+
+            target = node_state.get("current_check") or ""
+            log_rows.append((node_name, target, False))
+            render_log()
+
+            # Merge scalars
+            for key in ("risk_score", "risk_level", "summary", "action_advice",
+                        "input_type", "memory_context", "next_agent", "current_check"):
+                if node_state.get(key) is not None:
+                    final_state[key] = node_state[key]
+
+            # Accumulate findings (never overwrite, only extend)
+            if node_state.get("findings"):
+                all_findings.extend(node_state["findings"])
+
+            # Keep latest queue state
+            for key in ("to_scan", "scanned"):
+                if key in node_state:
+                    final_state[key] = node_state[key]
+
+    # Mark last step done
+    if log_rows:
+        prev = log_rows[-1]
+        log_rows[-1] = (prev[0], prev[1], True)
+    render_log()
+
+    final_state["findings"] = all_findings
+    return final_state
+
+
+# ── Helpers for extracting OutputAgent report from findings ───────────────────
+def extract_output_report(findings: list) -> dict:
+    """
+    OutputAgent appends a Findings object with:
+      threat_sum = ["Threat Score: 95", "Level: CRITICAL"]
+      vulnerability_sum = ["Vulnerability Score: 85", "indicator1", ...]
+    We parse those — because stream_mode="updates" only returns keys in
+    ArgusState TypedDict, and risk_level/risk_score are missing from it.
+    """
+    threat_score = vuln_score = None
+    risk_level   = None
+    indicators   = []
+
+    for f in findings:
+        agent_val  = str(getattr(getattr(f, "agent", ""), "value", ""))
+        threat_sum = getattr(f, "threat_sum", [])
+        vuln_sum   = getattr(f, "vulnerability_sum", [])
+
+        if agent_val != "orchestrator":
+            continue
+        if not any("Threat Score" in str(t) for t in threat_sum):
+            continue
+
+        for t in threat_sum:
+            s = str(t)
+            if "Threat Score" in s:
+                try: threat_score = int(s.split(":")[-1].strip())
+                except: pass
+            if "Level" in s:
+                try: risk_level = s.split(":")[-1].strip()
+                except: pass
+
+        for v in vuln_sum:
+            s = str(v)
+            if "Vulnerability Score" in s:
+                try: vuln_score = int(s.split(":")[-1].strip())
+                except: pass
+            else:
+                indicators.append(s)
+
+    return {
+        "threat_score": threat_score,
+        "vuln_score":   vuln_score,
+        "risk_level":   risk_level,
+        "indicators":   indicators,
+    }
+
+
+# ── Render results ────────────────────────────────────────────────────────────
+def render_results(result: dict):
+    findings   = result.get("findings") or []
+
+    # Extract everything from the OutputAgent findings object —
+    # stream_mode="updates" does NOT return risk_level/risk_score/summary/action_advice
+    # because they are missing from ArgusState TypedDict.
+    report = extract_output_report(findings)
+
+    threat_score = report["threat_score"] or 0
+    vuln_score   = report["vuln_score"]   or 0
+    risk_level   = report["risk_level"]   or result.get("risk_level") or "UNKNOWN"
+    risk_score   = max(threat_score, vuln_score)
+    indicators   = report["indicators"]
+
+    # summary and action_advice: try state first, then fall back to findings text
+    summary    = result.get("summary") or ""
+    action_adv = result.get("action_advice") or ""
+
+    st.markdown("---")
+
+    # ── Score row — use the REAL scores from OutputAgent ─────────────────────
+    col_ts, col_vs, col_lvl = st.columns([1, 1, 1])
+
+    with col_ts:
+        st.markdown("**Bedrohungs-Score**")
+        color_t = LEVEL_COLOR.get(risk_level, "#9ca3af")
+        st.markdown(
+            f'<span style="font-size:2.2rem;font-weight:700">{threat_score}</span>'
+            f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
+            f'{score_bar(threat_score, color_t)}',
+            unsafe_allow_html=True,
+        )
+    with col_vs:
+        st.markdown("**Schwachstellen-Score**")
+        st.markdown(
+            f'<span style="font-size:2.2rem;font-weight:700">{vuln_score}</span>'
+            f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
+            f'{score_bar(vuln_score, "#f59e0b")}',
+            unsafe_allow_html=True,
+        )
+    with col_lvl:
+        st.markdown("**Gesamteinstufung**")
+        st.markdown(level_badge(risk_level), unsafe_allow_html=True)
+        if risk_level == "CRITICAL":
+            st.error("Sofortiger Handlungsbedarf!")
+        elif risk_level == "HIGH":
+            st.warning("Erhöhtes Risiko — Vorsicht geboten.")
+        elif risk_level == "MEDIUM":
+            st.info("Moderates Risiko — aufmerksam bleiben.")
+        else:
+            st.success("Kein akutes Risiko erkannt.")
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    if summary:
+        st.markdown("---")
+        st.markdown("#### Zusammenfassung")
+        st.info(summary)
+
+    # ── Indicators ────────────────────────────────────────────────────────────
+    if indicators:
+        st.markdown("#### 💡 Haupt-Risikoindikatoren")
+        cols = st.columns(3)
+        for i, ind in enumerate(indicators[:9]):
+            clean = ind.replace("**", "").replace("`", "").strip("- ").strip()
+            if not clean:
+                continue
+            with cols[i % 3]:
+                st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
+
+    # ── Action advice ─────────────────────────────────────────────────────────
+    if action_adv:
+        st.markdown("---")
+        st.markdown("#### Handlungsempfehlungen")
+
+        # Split on the marker the OutputAgent uses
+        split_marker = "FALLS BEREITS GEKLICKT:"
+        if split_marker in action_adv:
+            parts = action_adv.split(split_marker, 1)
+            prevent_text  = parts[0].replace("PRÄVENTION:", "").strip()
+            incident_text = parts[1].strip()
+        else:
+            # OutputAgent sometimes uses newline-separated numbered lists without the marker
+            prevent_text  = action_adv.strip()
+            incident_text = ""
+
+        col_p, col_i = st.columns(2)
+        with col_p:
+            st.markdown("🚫 **Unbedingt vermeiden**")
+            # Render as markdown so bold/lists work
+            st.markdown(
+                f'<div class="action-box action-prevent">{prevent_text}</div>',
+                unsafe_allow_html=True,
+            )
+        with col_i:
+            if incident_text:
+                st.markdown("🔥 **Falls bereits geklickt**")
+                st.markdown(
+                    f'<div class="action-box action-incident">{incident_text}</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown("🔥 **Falls bereits geklickt**")
+                st.markdown(
+                    '<div class="action-box action-incident">'
+                    '1. Gerät sofort vom Netzwerk trennen.<br>'
+                    '2. Passwörter von einem sicheren Gerät ändern.<br>'
+                    '3. Bank / IT-Sicherheit kontaktieren.<br>'
+                    '4. Gerät auf Malware scannen.'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── Agent findings detail ─────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### Agent-Findings (Detail)")
+
+    # Show only real agent findings — skip orchestrator routing logs and the output summary
+    display_findings = []
+    seen = set()
+    for f in findings:
+        agent_val = str(getattr(getattr(f, "agent", ""), "value", ""))
+        inp       = getattr(f, "input", "")
+        key       = (agent_val, inp)
+        if agent_val == "orchestrator":
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        display_findings.append(f)
+
+    if not display_findings:
+        st.caption("Keine Detail-Findings vorhanden.")
+    else:
+        for f in display_findings:
+            agent_val  = str(getattr(getattr(f, "agent", ""), "value", "?"))
+            inp        = getattr(f, "input", "")
+            threats    = getattr(f, "threat_sum", [])
+            vulns      = getattr(f, "vulnerability_sum", [])
+            icon       = AGENT_ICON.get(agent_val, "⚙️")
+
+            with st.expander(f"{icon} {agent_val.upper()} — {inp[:60]}", expanded=False):
+                if threats:
+                    st.markdown("**🎯 Bedrohungen**")
+                    for t in threats:
+                        if str(t).strip():
+                            st.markdown(f"- {t}")
+                if vulns:
+                    st.markdown("**🔍 Schwachstellen / Befunde**")
+                    for v in vulns:
+                        if str(v).strip():
+                            st.markdown(f"- {v}")
+                if not threats and not vulns:
+                    st.caption("Keine Befunde.")
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+def main():
+    render_sidebar()
+
+    if check_archiv(): return
+
+    st.markdown(
+        '<div class="argus-header">'
+        '<span style="font-size:2.2rem">👁️</span>'
+        '<div><p class="argus-title">OSINT-Argus</p>'
+        '<p class="argus-sub">Multi-Agent Cybersecurity Analyzer</p></div>'
+        '</div>', unsafe_allow_html=True,
+    )
+
+    col_input, col_help = st.columns([3, 1])
+    with col_input:
+        user_input = st.text_area(
+            "Input",
+            placeholder=(
+                "Domain          →  example.com\n"
+                "E-Mail-Adresse  →  user@domain.com\n"
+                "E-Mail-Inhalt   →  komplette Mail hier reinkopieren\n"
+                "Telefonnummer   →  +49 151 12345678\n"
+                "Dateipfad/Hash  →  /pfad/zur/datei.pdf"
+            ),
+            height=190,
+            label_visibility="collapsed",
+        )
+    with col_help:
+        st.markdown("**Unterstützte Inputs**")
+        for line in ["🌐 Domain / URL", "📧 E-Mail-Adresse", "📨 E-Mail-Inhalt",
+                     "📞 Telefonnummer", "📄 Datei / Hash", "🔎 Software + Version"]:
+            st.caption(line)
+
+    run_col, clear_col, _ = st.columns([1, 1, 4])
+    with run_col:
+        run_btn = st.button("🔍 Analysieren", type="primary", use_container_width=True)
+    with clear_col:
+        if st.button("✕ Leeren", use_container_width=True):
+            st.session_state.pop("last_result", None)
+            st.rerun()
+
+    if run_btn:
+        if not user_input or not user_input.strip():
+            st.warning("Bitte einen Input eingeben.")
+        else:
+            t0 = time.time()
+            try:
+                result  = run_with_live_log(user_input.strip())
+                elapsed = round(time.time() - t0, 1)
+                st.success(f"✅ Analyse abgeschlossen in {elapsed}s")
+            except Exception as e:
+                st.error(f"❌ Pipeline-Fehler: {type(e).__name__}: {e}")
+                st.stop()
+
+            if "history" not in st.session_state:
+                st.session_state["history"] = []
+            st.session_state["history"].append({
+                "query":      user_input.strip()[:60],
+                "risk_level": result.get("risk_level", "UNKNOWN"),
+                "score":      result.get("risk_score", 0),
+            })
+            st.session_state["last_result"] = result
+
+    if "last_result" in st.session_state:
+        render_results(st.session_state["last_result"])
+
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="app/agents/output_agent.py">
+import json
+from langchain_core.prompts import ChatPromptTemplate
 from app.agents.base_agent import BaseAgent
+from app.models.router import OutputReport
 from app.state import ArgusState
 from app.models.llm import get_llm
+from app.models.findings import Findings
+from app.models.agent_type import AgentType
+from app.memory.chroma_memory import save_analysis
 
-class InputExtraction(BaseModel):
-    input_type: Literal["domain", "email", "text", "phone", "file", "identity", "unknown"] = Field(
-        description="Der primäre Typ des empfangenen Gesamt-Inputs."
-    )
-    extracted_targets: List[str] = Field(
-        description="Liste aller extrahierten Entitäten, die gescannt werden müssen (E-Mail-Adressen, Domains, IPs, Telefonnummern, Software-Namen, Identitäten, Hashes oder Dateipfade)."
-    )
+llm = get_llm()
 
-class InputAgent(BaseAgent):
+SYSTEM_PROMPT = """Du bist der OutputAgent von OSINT-Argus. Deine Aufgabe ist es, aus allen gesammelten Agenten-Findings einen finalen, nicht-deterministischen Cybersecurity-Risikobericht zu generieren.
+
+Analysiere die Findings aus zwei Blickwinkeln:
+1. Threat Score (0-100): Gibt es Anzeichen für aktive Angreifer, Phishing-Absichten, Malware (URLhaus) oder böswillige Absichten?
+2. Vulnerability Score (0-100): Gibt es offene Flanken? (Fehlendes SPF/DMARC, abgelaufenes SSL, bekannte Software-CVEs)?
+
+Leite daraus das risk_level ab:
+- LOW (Scores vorwiegend < 33)
+- MEDIUM (Scores vorwiegend 34-66)
+- HIGH (Scores vorwiegend 67-84)
+- CRITICAL (Scores vorwiegend 85-100 oder akuter Phishing/Malware-Befund)
+
+WICHTIG FÜR DIE HANDLUNGSANWEISUNGEN:
+- Formuliere in 'action_prevent' eine klare Warnung, was auf KEINEN Fall getan werden darf (z.B. 'Nicht auf Links klicken, da...').
+- Erstelle in 'action_incident_response' eine klare, chronologische 1., 2., 3.-Schritt-Anleitung für den Fall, DASS der Nutzer bereits auf den Link geklickt, die Datei geöffnet oder mit dem Absender interagiert hat.
+
+Regeln:
+- Tool-Fehler/Timeouts fließen NICHT negativ in die Scores ein.
+- Nutze nur explizit beobachtete Fakten aus den Findings. Erfinde nichts.
+"""
+
+def _format_findings_for_llm(state: ArgusState) -> str:
+    """Extrahiert Daten direkt aus den Attributen der neuen Findings-Dataclass."""
+    if not state.get("findings"):
+        return "Keine Findings vorhanden."
+        
+    lines = []
+    for f in state["findings"]:
+        # Bestimme den Namen des Agenten aus dem Enum oder String
+        agent_name = f.agent.value if hasattr(f.agent, "value") else str(f.agent)
+        
+        lines.append(
+            f"=== Finding von Agent: {agent_name} ===\n"
+            f"Prüfobjekt (Input): {f.input}\n"
+            f"Bedrohungen (Threats): {f.threat_sum}\n"
+            f"Schwachstellen (Vulnerabilities): {f.vulnerability_sum}\n"
+        )
+    return "\n".join(lines)
+
+
+class OutputAgent(BaseAgent):
+
     def __init__(self):
-        # Wir zwingen das LLM, strukturiert zu antworten
-        self.llm = get_llm().with_structured_output(InputExtraction)
+        # Nutzen des erweiterten Pydantic-Modells
+        self._llm = llm.with_structured_output(OutputReport)
 
     def run(self, state: ArgusState) -> ArgusState:
-        user_input = state["user_input"]
+        input_type = state.get("input_type", "unknown")
+        findings_text = _format_findings_for_llm(state)
 
-        system_prompt = """Du bist der InputAgent (Triage) von OSINT-Argus.
-Deine Aufgabe ist es, den rohen Benutzer-Input zu analysieren und strukturierte Angriffsziele (Targets) zu extrahieren.
+        prompt_input = (
+            f"Eingabetyp des Systems: {input_type}\n\n"
+            f"=== ALLE AGENTEN FINDINGS ===\n{findings_text}\n\n"
+            f"Erstelle den finalen Risikobericht inklusive Vorbeugung und Incident-Response-Schritten."
+        )
 
-1. Bestimme den globalen Typ des Inputs. Nutze strikt einen dieser Werte: 'domain', 'email', 'text', 'phone', 'file', 'identity', 'unknown'.
+        try:
+            report: OutputReport = self._llm.invoke([
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": prompt_input},
+            ])
+        except Exception as e:
+            print(f"⚠️ OutputAgent: Structured output fehlgeschlagen — {e}")
+            # Fallback bei unerwarteten API- oder Parsingfehlern
+            report = OutputReport(
+                threat_score=50,
+                vulnerability_score=50,
+                risk_level="MEDIUM",
+                explanation="Der Bericht konnte aufgrund eines technischen Fehlers nicht generiert werden.",
+                summary="Automatische Berichterstellung fehlgeschlagen.",
+                action_prevent="Interagiere nicht mit den Objekten, bis eine manuelle Prüfung stattfand.",
+                action_incident_response=["1. System isolieren", "2. IT-Sicherheit kontaktieren"],
+                indicators=["Parsing-Fehler im OutputAgent"]
+            )
 
-2. Extrahiere alle cyber-relevanten Einzel-Targets für die 'to_scan'-Liste des Orchestrators:
-   - IPs, Domains, URLs, E-Mail-Adressen und Telefonnummern.
-   - Software-Zustände (z.B. 'nginx 1.18', 'Apache 2.4').
-   - Krypto-Hashes (MD5, SHA1, SHA256) und vollständige lokale Dateipfade (z.B. 'C:\\Ordner\\datei.pdf' oder '/var/log/syslog').
+        # ── State befüllen ───────────────────────────────────────────────────
+        state["risk_score"] = max(report.threat_score, report.vulnerability_score) 
+        state["risk_level"] = report.risk_level
+        state["summary"] = report.summary
+        state["action_advice"] = f"PRÄVENTION:\n{report.action_prevent}\n\nFALLS BEREITS GEKLICKT:\n" + "\n".join(report.action_incident_response)
 
-WICHTIGE EXTRAKTIONS-REGELN:
-- Extrahiere NUR den nackten, bereinigten Wert der Entität.
-- Füge NIEMALS erklärenden Text, Labels oder Beschreibungen in ein Target ein. 
-  * Falsch: "MD5-Hash (Datei-Indikator)" oder "SHA256: e3b0c4..."
-  * Richtig: "e3b0c4..." (nur der Hash selbst)
-- Wenn der Input eine E-Mail oder ein längerer Text ist, durchsuche den gesamten Text akribisch nach eingebetteten Hashes, IP-Adressen und Dateipfaden und nimm sie alle als separate, isolierte Elemente in die Liste auf."""
+        # Hänge den finalen Report als echtes Findings-Objekt an die Liste an
+        final_finding = Findings(
+            agent=AgentType.ORCHESTRATOR, 
+            input="Zusammenfassung aller Findings",
+            threat_sum=[f"Threat Score: {report.threat_score}", f"Level: {report.risk_level}"],
+            vulnerability_sum=[f"Vulnerability Score: {report.vulnerability_score}"] + report.indicators
+        )
+        state["findings"].append(final_finding)
 
-        # LLM aufrufen
-        extraction: InputExtraction = self.llm.invoke([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Analysiere folgenden Input und extrahiere alle Einzel-Targets sauber:\n\n{user_input}"}
-        ])
+        # ── NEU: Strukturiertes JSON für ChromaDB bauen ──────────────────────
+        # Wir packen alle wichtigen Metadaten direkt in das Dokument, damit 
+        # die Sidebar darauf zugreifen kann.
+        chroma_payload = {
+            "risk_level": report.risk_level,
+            "score": max(report.threat_score, report.vulnerability_score),
+            "summary": report.summary,
+            "indicators": report.indicators,
+            "action_prevent": report.action_prevent,
+            "action_incident_response": report.action_incident_response
+        }
 
-        # State initialisieren und befüllen
-        state["input_type"] = extraction.input_type
-        state["to_scan"] = extraction.extracted_targets
-        state["scanned"] = []
-        state["current_check"] = None
+        # Als JSON-String serialisiert in die ChromaDB wegschreiben
+        save_analysis(
+            query=state.get("user_input", ""),
+            content=json.dumps(chroma_payload, ensure_ascii=False)
+        )
 
-        print(f"\n📥 [InputAgent] Globaler Typ erkannt: {extraction.input_type.upper()}")
-        print(f"🎯 [InputAgent] {len(extraction.extracted_targets)} Targets extrahiert für den Orchestrator:")
-        for target in extraction.extracted_targets:
-            print(f"  → {target}")
+        # ── Ausgabe im Terminal ──────────────────────────────────────────────
+        self._print_custom_report(report)
 
         return state
+    
+    def _print_custom_report(self, report: OutputReport) -> None:
+        """Übersichtliche und detaillierte Konsolenausgabe des neuen Reports."""
+        level_icons = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨"}
+        icon = level_icons.get(report.risk_level, "⚪")
+
+        print("\n" + "═" * 60)
+        print(f"  {icon}  OSINT-ARGUS FINALER RISIKOBERICHT  {icon}")
+        print("═" * 60)
+        print(f"  Bedrohungs-Score (Threat)      : {report.threat_score}/100")
+        print(f"  Schwachstellen-Score (Vuln)    : {report.vulnerability_score}/100")
+        print(f"  Gesamteinstufung                : [{report.risk_level}]")
+        print("-" * 60)
+        print(f"  Zusammenfassung (Laie):\n  {report.summary}")
+        print("-" * 60)
+        print(f"  🚨 WICHTIG - UNBEDINGT VERMEIDEN:\n  {report.action_prevent}")
+        print("-" * 60)
+        print(f"  🔥 FALLS DU BEREITS GEKLICKT HAST:")
+        for i, step in enumerate(report.action_incident_response, 1):
+            print(f"    {step}")
+        print("-" * 60)
+        print(f"  💡 Haupt-Risikoindikatoren:")
+        for ind in report.indicators:
+            print(f"     • {ind}")
+        print("═" * 60 + "\n")
 </file>
 
 <file path="app/models/llm.py">
@@ -2631,6 +2829,67 @@ class DomainAgent(BaseAgent):
         return state
 </file>
 
+<file path="app/agents/input_agent.py">
+import json
+from pydantic import BaseModel, Field
+from typing import Literal, List
+from app.agents.base_agent import BaseAgent
+from app.state import ArgusState
+from app.models.llm import get_llm
+
+class InputExtraction(BaseModel):
+    input_type: Literal["domain", "email", "text", "phone", "file", "identity", "unknown"] = Field(
+        description="Der primäre Typ des empfangenen Gesamt-Inputs."
+    )
+    extracted_targets: List[str] = Field(
+        description="Liste aller extrahierten Entitäten, die gescannt werden müssen (E-Mail-Adressen, Domains, IPs, Telefonnummern, Software-Namen, Identitäten, Hashes oder Dateipfade)."
+    )
+
+class InputAgent(BaseAgent):
+    def __init__(self):
+        # Wir zwingen das LLM, strukturiert zu antworten
+        self.llm = get_llm().with_structured_output(InputExtraction)
+
+    def run(self, state: ArgusState) -> ArgusState:
+        user_input = state["user_input"]
+
+        system_prompt = """Du bist der InputAgent (Triage) von OSINT-Argus.
+Deine Aufgabe ist es, den rohen Benutzer-Input zu analysieren und strukturierte Angriffsziele (Targets) zu extrahieren.
+
+1. Bestimme den globalen Typ des Inputs. Nutze strikt einen dieser Werte: 'domain', 'email', 'text', 'phone', 'file', 'identity', 'unknown'.
+
+2. Extrahiere alle cyber-relevanten Einzel-Targets für die 'to_scan'-Liste des Orchestrators:
+   - IPs, Domains, URLs, E-Mail-Adressen und Telefonnummern.
+   - Software-Zustände (z.B. 'nginx 1.18', 'Apache 2.4').
+   - Krypto-Hashes (MD5, SHA1, SHA256) und vollständige lokale Dateipfade (z.B. 'C:\\Ordner\\datei.pdf' oder '/var/log/syslog').
+
+WICHTIGE EXTRAKTIONS-REGELN:
+- Extrahiere NUR den nackten, bereinigten Wert der Entität.
+- Füge NIEMALS erklärenden Text, Labels oder Beschreibungen in ein Target ein. 
+  * Falsch: "MD5-Hash (Datei-Indikator)" oder "SHA256: e3b0c4..."
+  * Richtig: "e3b0c4..." (nur der Hash selbst)
+- Wenn der Input eine E-Mail oder ein längerer Text ist, durchsuche den gesamten Text akribisch nach eingebetteten Hashes, IP-Adressen und Dateipfaden und nimm sie alle als separate, isolierte Elemente in die Liste auf."""
+
+        # LLM aufrufen
+        extraction: InputExtraction = self.llm.invoke([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Analysiere folgenden Input und extrahiere alle Einzel-Targets sauber:\n\n{user_input}"}
+        ])
+
+        # State initialisieren und befüllen
+        state["input_type"] = extraction.input_type
+        state["to_scan"] = extraction.extracted_targets
+        state["scanned"] = []
+        state["current_check"] = None
+
+        print(f"\n📥 [InputAgent] Globaler Typ erkannt: {extraction.input_type.upper()}")
+        print(f"🎯 [InputAgent] {len(extraction.extracted_targets)} Targets extrahiert für den Orchestrator:")
+        for target in extraction.extracted_targets:
+            print(f"  → {target}")
+
+        return state
+</file>
+
 <file path="app/models/agent_type.py">
 from enum import Enum
 
@@ -2667,662 +2926,6 @@ class ArgusState(TypedDict):
     file_hashes: List[str]
 </file>
 
-<file path="README.md">
-# 👁️ OSINT-Argus — Multi-Agent OSINT Cybersecurity System
-
-> **Agentic AI system that uses Open-Source Intelligence (OSINT) to analyse domains, emails and CVEs — protecting users from phishing, malware and infrastructure threats.**
-
-Built with **LangGraph**, **LangChain** and **ChromaDB**. Designed as a modular, extensible multi-agent pipeline where each agent handles one specialised analysis task.
-
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Project Structure](#project-structure)
-- [Agents](#agents)
-- [Tools](#tools)
-- [State & Routing](#state--routing)
-- [Memory (ChromaDB)](#memory-chromadb)
-- [Setup](#setup)
-- [Configuration](#configuration)
-- [Running the App](#running-the-app)
-- [Example Output](#example-output)
-- [Sprint Status](#sprint-status)
-- [Roadmap — Sprint 3](#roadmap--sprint-3)
-- [Tech Stack](#tech-stack)
-
----
-
-## Overview
-
-OSINT-Argus is a **supervisor-pattern multi-agent system** that accepts a free-form user input (a domain name, raw email, or URL), classifies it automatically, and routes it to the appropriate specialised agent. Each agent executes a defined set of OSINT tools and returns structured findings that are aggregated into a final risk report.
-
-The goal is to give any user — without technical OSINT knowledge — a clear, actionable answer to the question: **"Is this domain / email / link safe?"**
-
-The system outputs a **risk score (0–100)**, a **risk level** (LOW / MEDIUM / HIGH / CRITICAL), a plain-language summary, and a concrete **action recommendation** — ready to drive a traffic-light UI on any frontend.
-
----
-
-## Architecture
-
-```
-User Input
-    │
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│  Input Classifier  (regex-based, fast pre-check)        │
-└────────────────────────┬────────────────────────────────┘
-                         │ input_type: domain | email | unknown
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│  OrchestratorAgent  (LLM-powered routing supervisor)    │
-│  • Validates / overrides classifier result              │
-│  • Sets next_agent in shared ArgusState                 │
-│  • Drives adaptive email pipeline (EmailPipelineDecision)│
-│  • Routes to OutputAgent when analysis is complete      │
-└────────────┬───────────────────────┬────────────────────┘
-             │                       │
-          domain                   email
-             ▼                       ▼
-┌────────────────────┐     ┌─────────────────────────────┐
-│   DomainAgent      │     │   EmailAgent                │
-│   (AgentExecutor + │     │   Pass 1 — Extraction       │
-│    6 OSINT tools)  │     │   (headers, URLs, domains)  │
-└────────┬───────────┘     │   Pass 2 — Judgement        │
-         │                 │   (VirusTotal + LLM report) │
-         │                 └──────────────┬──────────────┘
-         │                                │
-         └──────────┬─────────────────────┘
-                    │ both routes back to OrchestratorAgent
-                    ▼
-┌─────────────────────────────────────────────────────────┐
-│  OutputAgent  (LLM structured output)                   │
-│  • Aggregates all findings                              │
-│  • Produces risk_score (0–100), risk_level, summary     │
-│  • Generates action_advice for the user                 │
-└─────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────┐
-│  ArgusState  (shared LangGraph state, TypedDict)        │
-│  • findings, risk_score, risk_level                     │
-│  • summary, action_advice, memory_context               │
-└─────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────┐
-│  ChromaDB  (persistent vector store)                    │
-│  • Saves analysis results for future RAG context        │
-└─────────────────────────────────────────────────────────┘
-```
-
-The graph is compiled with **LangGraph `StateGraph`** and uses conditional edges so that the orchestrator's routing decision (`next_agent`) determines which agent node runs next. Every analysis agent routes back to the orchestrator; the orchestrator decides when enough data is gathered and routes to `OutputAgent`.
-
----
-
-## Project Structure
-
-```
-MultiAgent-OSINT-Argus/
-│
-├── app/
-│   ├── main.py                    # Entry point — reads input, builds state, invokes graph
-│   ├── graph.py                   # LangGraph StateGraph — nodes, edges, entry point
-│   ├── state.py                   # ArgusState TypedDict — shared state schema
-│   ├── config.py                  # Loads .env — API keys, base URL, model name
-│   │
-│   ├── agents/
-│   │   ├── base_agent.py          # Abstract BaseAgent — defines run(state) interface
-│   │   ├── orchestrator_agent.py  # LLM routing supervisor + adaptive email pipeline
-│   │   ├── domain_agent.py        # Domain OSINT analysis via 6 tools + LLM report
-│   │   ├── email_agent.py         # Email phishing analysis — Pass 1 extraction, Pass 2 judgement
-│   │   └── output_agent.py        # Final risk report — score, level, summary, action advice
-│   │
-│   ├── models/
-│   │   ├── llm.py                 # ChatOpenAI factory — configured LLM instance
-│   │   └── router.py              # Pydantic models: RouteDecision, EmailPipelineDecision, OutputReport
-│   │
-│   ├── memory/
-│   │   └── chroma_memory.py       # ChromaDB client — save_analysis() + search_memory()
-│   │
-│   └── tools/
-│       ├── classifier.py          # Regex classifier — fast pre-routing before LLM
-│       ├── whois_tool.py          # WHOIS lookup — registrar, dates, name servers
-│       ├── dns_tool.py            # DNS records — A, MX, NS
-│       ├── domain_tools.py        # SSL, SPF/DMARC/DKIM, URLhaus, crt.sh
-│       └── email_tools.py         # URL extraction, header parsing, Reply-To check, VirusTotal
-│
-├── app/email_test.txt             # Sample phishing email for local testing
-├── .env                           # Local secrets (not committed)
-├── .env.example                   # Template for required environment variables
-├── requirements.txt               # Python dependencies
-└── README.md                      # This file
-```
-
----
-
-## Agents
-
-### `BaseAgent` — Abstract Interface
-
-Every agent inherits from `BaseAgent` and must implement one method:
-
-```python
-def run(self, state: ArgusState) -> ArgusState
-```
-
-The agent receives the full shared state, performs its work, appends its findings to `state["findings"]`, and returns the mutated state. This contract guarantees composability inside the LangGraph graph.
-
----
-
-### `OrchestratorAgent` — Routing Supervisor
-**File:** `app/agents/orchestrator_agent.py`
-
-The central coordinator. Handles two distinct routing modes depending on the conversation stage:
-
-**Initial routing** (first call): Uses `with_structured_output(RouteDecision)` to classify the input and set `next_agent`. Initialises email pipeline fields if the input is an email.
-
-**Email pipeline routing** (subsequent calls during email analysis): Uses `with_structured_output(EmailPipelineDecision)` to adaptively decide after each domain scan whether to scan another domain, trigger EmailAgent Pass 2 (judgement), or skip straight to output if the threat is already critical.
-
-**Post-domain routing**: After `DomainAgent` completes for a direct domain input, the orchestrator detects the finished finding via `_agent_ran()` and routes to `OutputAgent` — preventing re-routing loops.
-
-**Supported routes:**
-
-| Trigger | Next Agent |
-|---------|------------|
-| Domain input, first call | `domain` |
-| Domain input, DomainAgent already ran | `output` |
-| Email input, more domains to scan | `domain` |
-| Email input, enough data for judgement | `email` (Pass 2) |
-| Email input, critical signal found | `output` (skip Pass 2) |
-| Email Pass 2 complete | `output` |
-| Unknown input | `output` |
-
----
-
-### `DomainAgent` — Full Domain OSINT Analysis
-**File:** `app/agents/domain_agent.py`
-
-Built on a **LangChain `AgentExecutor`** with `create_tool_calling_agent`. Supports both standalone domain analysis and being called mid-pipeline for individual domains inside an email scan (reads `state.get("current_domain") or state["user_input"]`).
-
-**Mandatory execution order (enforced via system prompt):**
-1. `run_whois` → domain age, registrar, expiry
-2. `run_dns_lookup` → A, MX, NS records
-3. `run_crtsh` → subdomain enumeration via Certificate Transparency
-4. `run_urlhaus` → malware database check (abuse.ch)
-5. `run_spf_dmarc_check` → email security posture (SPF, DMARC, DKIM)
-6. `run_ssl_check` → TLS certificate validity and expiry
-
-After all tools have run, the LLM produces a structured JSON report:
-
-```json
-{
-  "threat_indicators": ["..."],
-  "exposure_findings": ["..."],
-  "summary": "2-3 sentence overall assessment"
-}
-```
-
----
-
-### `EmailAgent` — Phishing Analysis (Two-Pass)
-**File:** `app/agents/email_agent.py`
-
-Analyses raw email content in two passes, orchestrated adaptively by the `OrchestratorAgent`.
-
-**Pass 1 — Extraction** (`_run_pass1`): Pure Python, no LLM call. Parses email headers, extracts all URLs, derives domains to scan, detects Reply-To mismatches. Writes `email_extraction` and `domains_to_scan` to state so the orchestrator can drive domain scans.
-
-**Pass 2 — Judgement** (`_run_pass2`): LLM-powered. Receives the domain analysis findings already gathered by `DomainAgent`, calls `check_virustotal_domain` on the sender domain, then produces a JSON content assessment:
-
-```json
-{
-  "phishing_indicators": ["Dringlichkeit", "Impersonation", "Reply-To Mismatch"],
-  "content_risk": "HIGH",
-  "sender_assessment": "Domain paypa1-verify.ru ist bekannte Phishing-Domain",
-  "summary": "..."
-}
-```
-
----
-
-### `OutputAgent` — Final Risk Report
-**File:** `app/agents/output_agent.py`
-
-The terminal agent. Collects every finding from `state["findings"]`, formats them into a compact prompt, and uses `with_structured_output(OutputReport)` to produce a fully typed final report.
-
-**Output written to state:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `risk_score` | `int` (0–100) | Numeric risk — maps directly to frontend progress bar or gauge |
-| `risk_level` | `"LOW" \| "MEDIUM" \| "HIGH" \| "CRITICAL"` | Traffic-light level |
-| `summary` | `str` | Plain-language summary for end users (no jargon) |
-| `action_advice` | `str` | Concrete recommendation: what to do right now |
-| `indicators` | `List[str]` | Top 3–5 key risk factors found |
-
-**Traffic-light mapping for frontend:**
-
-| Score | Level | Colour |
-|-------|-------|--------|
-| 0–33 | LOW | 🟢 Green — no action needed |
-| 34–66 | MEDIUM | 🟡 Yellow — proceed with caution |
-| 67–84 | HIGH | 🔴 Red — action recommended |
-| 85–100 | CRITICAL | 🚨 Red — act immediately |
-
-**Example action_advice per level:**
-- **LOW:** "Diese Domain ist unbedenklich. Du kannst sie besuchen."
-- **MEDIUM:** "Öffne den Link nicht direkt. Navigiere stattdessen manuell zur offiziellen Website."
-- **HIGH:** "Besuche diese Domain nicht. Lösche die E-Mail und melde sie als Spam."
-- **CRITICAL:** "Sofort handeln: Klicke keine Links, öffne keine Anhänge. Melde die E-Mail an deine IT-Abteilung."
-
----
-
-## Tools
-
-All tools are registered as **LangChain `@tool`** decorated functions.
-
-### `run_whois` — WHOIS Lookup
-**File:** `app/tools/whois_tool.py`
-
-Queries public WHOIS databases for domain registration metadata. Returns registrar, creation date, expiration date, and name servers. Freshly registered domains are a common phishing indicator.
-
----
-
-### `run_dns_lookup` — DNS Record Lookup
-**File:** `app/tools/dns_tool.py`
-
-Resolves `A`, `MX`, and `NS` records using `dnspython`. Missing MX records can indicate a domain not intended for email but used for spoofing.
-
----
-
-### `run_ssl_check` — TLS Certificate Analysis
-**File:** `app/tools/domain_tools.py`
-
-Direct TLS handshake on port 443 using Python's `ssl` module with `certifi`. Detects expired certs, certs expiring within 14/30 days, self-signed certs, and WAF/TLS-interception (Cloudflare, Myra).
-
-**Verdicts:** `OK` | `WARNING` | `CRITICAL` | `UNKNOWN`
-
----
-
-### `run_spf_dmarc_check` — Email Security Posture
-**File:** `app/tools/domain_tools.py`
-
-Checks whether a domain is protected against email spoofing via SPF, DMARC (`_dmarc.<domain>`), and DKIM (probes 7 common selectors). A missing or weak configuration means anyone can spoof `@<domain>` emails.
-
-**Verdicts:** `SECURE` | `EXPOSED`
-
----
-
-### `run_urlhaus` — Malware Database Check
-**File:** `app/tools/domain_tools.py`
-
-Queries the **URLhaus API** (abuse.ch) — no API key required. Extracts whether the domain is a known malware host, active/total malicious URL counts, malware family tags, and blacklist status.
-
-**Verdicts:** `CLEAN` | `MALICIOUS` | `UNKNOWN`
-
----
-
-### `run_crtsh` — Subdomain Enumeration via Certificate Transparency
-**File:** `app/tools/domain_tools.py`
-
-Queries `crt.sh` for all SSL certificates ever issued for a domain. Caps at 100 certs, returns top 20 unique subdomains. Flags domains with more than 15 subdomains as elevated attack surface.
-
----
-
-### Email Tools
-**File:** `app/tools/email_tools.py`
-
-A set of pure-Python helper functions used by `EmailAgent` Pass 1 plus one LangChain tool:
-
-| Function | Description |
-|----------|-------------|
-| `extract_urls(text)` | Regex-based URL extraction from raw email body |
-| `extract_domain_from_url(url)` | Strips scheme and path, returns bare domain |
-| `parse_email_headers(text)` | Extracts From, To, Subject, Reply-To, Date |
-| `extract_sender_domain(from_header)` | Parses `Name <user@domain>` and `user@domain` formats |
-| `check_reply_to_mismatch(headers)` | Detects Reply-To ≠ From domain — classic phishing signal |
-| `check_virustotal_domain` | `@tool` — VirusTotal v3 domain reputation (requires `VT_API_KEY`) |
-
----
-
-## State & Routing
-
-### `ArgusState` — Shared Graph State
-**File:** `app/state.py`
-
-```python
-class ArgusState(TypedDict):
-    # Sprint 1
-    user_input:     str
-    input_type:     str
-    current_agent:  str
-    next_agent:     str
-    findings:       List[Dict[str, Any]]
-    risk_score:     Optional[int]
-    summary:        Optional[str]
-    memory_context: Optional[str]
-
-    # Sprint 2 — Email pipeline
-    email_pass:       int                      # 0=init | 1=extraction done | 2=judgement done
-    domains_to_scan:  List[str]                # from EmailAgent Pass 1
-    domains_scanned:  List[str]                # updated by Orchestrator after each DomainAgent run
-    current_domain:   Optional[str]            # domain currently being analysed by DomainAgent
-    email_extraction: Optional[Dict[str, Any]] # Pass 1 result
-
-    # Sprint 2 — OutputAgent
-    risk_level:    Optional[str]   # "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
-    action_advice: Optional[str]   # concrete action recommendation for the user
-```
-
-### Pydantic Models
-**File:** `app/models/router.py`
-
-**`RouteDecision`** — initial routing by the Orchestrator:
-```python
-class RouteDecision(BaseModel):
-    input_type: Literal["domain", "email", "url", "unknown"]
-    next_agent:  Literal["domain", "email", "cve", "output"]
-    reasoning:   str
-```
-
-**`EmailPipelineDecision`** — adaptive email pipeline routing:
-```python
-class EmailPipelineDecision(BaseModel):
-    action:        Literal["scan_domain", "proceed_to_judgement", "proceed_to_output"]
-    target_domain: Optional[str]                    # only for action=scan_domain
-    reasoning:     str
-    confidence:    Literal["LOW", "MEDIUM", "HIGH"]
-```
-
-**`OutputReport`** — final risk report from OutputAgent:
-```python
-class OutputReport(BaseModel):
-    risk_score:    int                                          # 0–100, validated
-    risk_level:    Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
-    explanation:   str                                          # technical, for experts
-    summary:       str                                          # plain language, for users
-    action_advice: str                                          # concrete recommendation
-    indicators:    List[str]                                    # top 3–5 risk factors
-```
-
-### Input Classifier
-**File:** `app/tools/classifier.py`
-
-Lightweight regex pre-classifier before the LLM call.
-
-| Pattern | Classification |
-|---------|----------------|
-| `user@domain.tld` | `email` |
-| `domain.tld` (no `@`) | `domain` |
-| Anything else | `unknown` |
-
----
-
-## Memory (ChromaDB)
-
-**File:** `app/memory/chroma_memory.py`
-
-Persistent ChromaDB client stored in `./chroma_db/`. The collection `argus_memory` stores past analysis results as documents, enabling **Retrieval-Augmented Generation (RAG)** in future runs.
-
-```python
-save_analysis(query="example.com", content="<full analysis JSON>")
-results = search_memory(query="example.com")  # top 3 nearest neighbours
-```
-
-> Active RAG injection into agent prompts is planned for Sprint 3.
-
----
-
-## Setup
-
-### Prerequisites
-
-- Python 3.11+
-- Access to an OpenAI-compatible API (e.g. [SAIA / Academic Cloud](https://chat-ai.academiccloud.de))
-- Optional: VirusTotal API key (free tier sufficient for EmailAgent)
-
-### Installation
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/<your-username>/MultiAgent-OSINT-Argus.git
-cd MultiAgent-OSINT-Argus
-
-# 2. Create and activate a virtual environment
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Set up environment variables
-cp .env.example .env
-# Edit .env with your actual API keys
-```
-
----
-
-## Configuration
-
-```env
-# Required — OpenAI-compatible API
-OPENAI_API_KEY=your_api_key_here
-OPENAI_BASE_URL=https://chat-ai.academiccloud.de/v1
-MODEL_NAME=mistral-large-instruct
-
-# Required for EmailAgent Pass 2
-VT_API_KEY=your_virustotal_key
-
-# Future — Sprint 3
-SHODAN_API_KEY=your_shodan_key
-```
-
-**Notes:**
-- `OPENAI_BASE_URL` supports any OpenAI-compatible endpoint. Developed and tested against the **German Academic Cloud (SAIA)**.
-- LLM timeout is set to **120 seconds** with 2 retries — adjusted from Sprint 1's 30s/1 retry after encountering SAIA latency issues.
-- `VT_API_KEY` is now actively used by EmailAgent Pass 2 for sender domain reputation checks.
-
----
-
-## Running the App
-
-```bash
-python -m app.main
-```
-
-```
-╔══════════════════════════════════════════════╗
-║       👁️  OSINT-Argus Multi-Agent            ║
-║     DomainAgent · EmailAgent · CVEAgent      ║
-║          RAG Memory · LangGraph              ║
-╚══════════════════════════════════════════════╝
-
-📝 Eingabe (leere Zeile zum Abschließen):
-```
-
-Multi-line input is supported — paste a full email, then press Enter on an empty line to submit. For pipe mode (`cat email.txt | python -m app.main`), EOF is handled automatically.
-
-**Supported inputs:**
-
-| Input | Routed To | Status |
-|-------|-----------|--------|
-| `example.com` | DomainAgent → OutputAgent | ✅ Working |
-| `sub.example.com` | DomainAgent → OutputAgent | ✅ Working |
-| Raw email with headers | EmailAgent (2-pass) → OutputAgent | ✅ Working |
-| CVE topic / keyword | CVEAgent | 🔜 Sprint 3 |
-
----
-
-## Example Output
-
-### Domain Analysis — `example.com`
-
-```python
-# state["findings"] (abbreviated)
-[
-  {
-    "agent": "OrchestratorAgent",
-    "decision": { "input_type": "domain", "next_agent": "domain", "reasoning": "..." }
-  },
-  {
-    "agent": "DomainAgent",
-    "domain": "example.com",
-    "ssl":            { "verdict": "OK", "days_until_expiry": 248 },
-    "email_security": { "verdict": "EXPOSED", "email_spoofing_possible": True },
-    "urlhaus":        { "verdict": "CLEAN" },
-    "ai_analysis": {
-      "threat_indicators": [],
-      "exposure_findings": ["Kein SPF-Record", "Kein DMARC-Record"],
-      "summary": "example.com ist eine IANA-Reservierungsdomain..."
-    }
-  },
-  {
-    "agent":        "OutputAgent",
-    "risk_score":   18,
-    "risk_level":   "LOW",
-    "explanation":  "Die Domain example.com ist eine IANA-Reservierungsdomain...",
-    "summary":      "Diese Domain ist unbedenklich und wird von IANA verwaltet.",
-    "action_advice":"Keine Aktion erforderlich. Du kannst diese Domain besuchen.",
-    "indicators":   ["Kein SPF-Record konfiguriert", "Kein DMARC-Record vorhanden"]
-  }
-]
-```
-
-### Email Analysis — Phishing Mail
-
-```
-═══════════════════════════════════════════════════════════
-  🚨  OSINT-Argus Risikobericht
-═══════════════════════════════════════════════════════════
-  Risiko-Score : 94/100  [CRITICAL]
-  Zusammenfassung:
-    Diese E-Mail ist eine klassische PayPal-Phishing-Mail.
-    Der Absender nutzt eine gefälschte Domain (paypa1-verify.ru)
-    und der Reply-To zeigt auf eine andere verdächtige Domain.
-
-  🎯 Empfehlung:
-    Sofort handeln: Klicke keine Links, öffne keine Anhänge.
-    Lösche die E-Mail und melde sie als Spam. Falls du bereits
-    auf den Link geklickt hast, ändere sofort dein Passwort.
-
-  ⚠️  Indikatoren:
-     • Absender-Domain paypa1-verify.ru als MALICIOUS eingestuft (VirusTotal)
-     • Reply-To Mismatch: account-helpdesk.xyz ≠ paypa1-verify.ru
-     • Dringlichkeitstaktik: "Konto wird gesperrt in 24 Stunden"
-     • Impersonation: gibt sich als PayPal-Sicherheitsteam aus
-     • Verdächtiger Login-Link auf account-verify.xyz
-═══════════════════════════════════════════════════════════
-```
-
----
-
-## Sprint Status
-
-### ✅ Sprint 1 — Base Setup (Complete)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| LangGraph `StateGraph` | ✅ | `OrchestratorAgent` + `DomainAgent` |
-| `ArgusState` TypedDict | ✅ | Full state contract |
-| WHOIS tool | ✅ | `python-whois` |
-| DNS tool | ✅ | `dnspython`, A/MX/NS |
-| SSL check | ✅ | WAF detection, expiry warnings |
-| SPF/DMARC/DKIM check | ✅ | Spoofing exposure detection |
-| URLhaus check | ✅ | abuse.ch, no key required |
-| Subdomain enumeration (crt.sh) | ✅ | Certificate Transparency |
-| Input Classifier (regex) | ✅ | Fast pre-routing |
-| OrchestratorAgent (LLM routing) | ✅ | `RouteDecision` structured output |
-| DomainAgent (AgentExecutor) | ✅ | 6 tools + LLM JSON report |
-| ChromaDB connected | ✅ | Persistent `argus_memory` collection |
-| Model selection & evaluation | ✅ | Mistral Large via SAIA |
-
-### ✅ Sprint 2 — Email Pipeline + Output (Complete)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| `EmailAgent` Pass 1 — header & URL extraction | ✅ | Pure Python, no LLM call |
-| `EmailAgent` Pass 2 — LLM phishing judgement | ✅ | VirusTotal + content analysis |
-| `email_tools.py` — URL/header/VirusTotal utilities | ✅ | `check_virustotal_domain` as LangChain `@tool` |
-| `EmailPipelineDecision` Pydantic model | ✅ | Adaptive orchestration |
-| Adaptive Orchestrator email routing | ✅ | LLM decides scan vs. judge vs. skip |
-| Multi-domain scanning within email pipeline | ✅ | Orchestrator loops DomainAgent per domain |
-| `DomainAgent` — `current_domain` support | ✅ | Works standalone and inside email pipeline |
-| `OutputAgent` — final risk report | ✅ | `OutputReport` structured output |
-| Risk score (0–100) + risk level | ✅ | Frontend-ready traffic-light mapping |
-| Plain-language summary | ✅ | Jargon-free, for end users |
-| Action advice | ✅ | Specific per input type and risk level |
-| `graph.py` — full pipeline wired | ✅ | domain/email → orchestrator → output → END |
-| LLM timeout increased to 120s | ✅ | Handles SAIA latency |
-| Multi-line CLI input + pipe mode | ✅ | Paste full emails, or `cat file \| python -m app.main` |
-
----
-
-## Roadmap — Sprint 3
-
-### CVEAgent
-- NVD NIST API integration (`nvd.nist.gov/rest/json`)
-- MITRE ATT&CK technique mapping
-- CVSS severity enrichment
-- Routing from OrchestratorAgent for CVE IDs and vulnerability topics
-
-### System-wide improvements
-- Active RAG injection from ChromaDB into agent prompts
-- Shodan integration in DomainAgent for infrastructure scanning
-- End-to-end test suite covering all 3 input scenarios
-- Frontend (REST API or Streamlit) consuming `risk_score`, `risk_level`, `action_advice`
-
----
-
-## Tech Stack
-
-| Component | Technology | Version |
-|-----------|-----------|---------|
-| Agent orchestration | [LangGraph](https://github.com/langchain-ai/langgraph) | latest |
-| LLM tooling | [LangChain](https://github.com/langchain-ai/langchain) | latest |
-| LLM provider | OpenAI-compatible API (SAIA / Academic Cloud) | — |
-| Default model | `mistral-large-instruct` | — |
-| Vector store | [ChromaDB](https://www.trychroma.com/) | latest |
-| WHOIS | `python-whois` | latest |
-| DNS resolution | `dnspython` | latest |
-| HTTP client | `httpx` | latest |
-| TLS inspection | Python `ssl` + `certifi` | stdlib |
-| Schema validation | `pydantic` | v2 |
-| Config management | `python-dotenv` | latest |
-
----
-
-## License
-
-MIT — see `LICENSE` for details.
-
----
-
-*OSINT-Argus is an academic project developed as part of an Agentic AI course. It is intended for educational and defensive security research purposes only.*
-</file>
-
-<file path="requirements.txt">
-langgraph
-langchain
-langchain-core
-langchain-community
-langchain-openai
-chromadb
-python-dotenv
-python-whois
-dnspython
-pydantic
-langchain-community
-langchain-classic
-certifi
-httpx
-phonenumbers
-pypdf
-pyexiftool
-streamlit
-</file>
-
 <file path="app/agents/orchestrator_agent.py">
 from app.agents.base_agent import BaseAgent
 from app.models.router import OrchestratorDecision
@@ -3330,7 +2933,6 @@ from app.state import ArgusState
 from app.models.llm import get_llm
 from app.models.findings import Findings
 from app.models.agent_type import AgentType
-from app.memory.chroma_memory import search_memory
 
 class OrchestratorAgent(BaseAgent):
 
@@ -3365,25 +2967,6 @@ class OrchestratorAgent(BaseAgent):
             state["next_agent"] = "output"
             state["current_check"] = None
             return state
-        remaining = [
-            item for item in state["to_scan"]
-            if item not in state["scanned"]
-        ]
-
-        user_input = state.get("user_input", "")
-
-        memory_results = search_memory(state.get("current_check", user_input))
-
-        memory_context = ""
-
-        if memory_results.get("documents"):
-            docs = memory_results["documents"][0]
-
-            memory_context = "\n\n".join(
-                f"Vorherige Analyse:\n{doc}"
-                for doc in docs
-            )
-        state["memory_context"] = memory_context
 
         # Überarbeiteter, präziser Prompt:
         system_prompt = """Du bist der zentrale Orchestrator von OSINT-Argus.
@@ -3406,25 +2989,16 @@ STRATEGISCHE QUEUE-REGELN:
 """
         
         user_content = f"""
-            === FRÜHERE ANALYSEN ===
-            {memory_context}
+        Gesamt-Input-Typ: {state.get('input_type')}
+        Aktuelle Target-Liste (to_scan): {state['to_scan']}
+        Bereits gescannt (scanned): {state['scanned']}
+        Noch offen: {remaining}
 
-            Gesamt-Input-Typ: {state.get('input_type')}
+        Bisherige Findings im System:
+        {self._format_findings_for_llm(state)}
 
-            Aktuelle Target-Liste (to_scan):
-            {state['to_scan']}
-
-            Bereits gescannt (scanned):
-            {state['scanned']}
-
-            Noch offen:
-            {remaining}
-
-            Bisherige Findings im System:
-            {self._format_findings_for_llm(state)}
-
-            Bestimme das nächste Ziel, filtere die verbleibende Queue und wähle den Agenten.
-            """
+        Bestimme das nächste Ziel, filtere die verbleibende Queue und wähle den Agenten.
+        """
 
         decision: OrchestratorDecision = self.llm.invoke([
             {"role": "system", "content": system_prompt},
@@ -3535,6 +3109,742 @@ if __name__ == "__main__":
     main()
 </file>
 
+<file path="README.md">
+# 👁️ OSINT-Argus — Multi-Agent OSINT Cybersecurity System
+
+> **Agentic AI system that uses Open-Source Intelligence (OSINT) to analyse domains, emails, phone numbers, files, CVEs and digital identities — protecting users from phishing, malware and infrastructure threats.**
+
+Built with **LangGraph**, **LangChain** and **ChromaDB**. Designed as a fully modular, extensible multi-agent pipeline where each agent handles one specialised analysis task and the orchestrator drives the entire queue adaptively.
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [Agents](#agents)
+- [Tools](#tools)
+- [State & Routing](#state--routing)
+- [Memory (ChromaDB)](#memory-chromadb)
+- [Setup](#setup)
+- [Configuration](#configuration)
+- [Running the App](#running-the-app)
+- [Example Output](#example-output)
+- [Tech Stack](#tech-stack)
+
+---
+
+## Overview
+
+OSINT-Argus is a **supervisor-pattern multi-agent system** built on LangGraph. It accepts any free-form user input — a domain, raw email, phone number, file path, hash, software version or personal identity — and routes it through a dynamic pipeline of specialised OSINT agents.
+
+The pipeline starts with an **InputAgent** that extracts all scannable targets from the raw input using structured LLM output. A central **OrchestratorAgent** then drives the scan queue adaptively: it prioritises targets by risk, assigns each one to the correct specialist agent, and loops until the queue is empty. Finally the **OutputAgent** aggregates all findings into a structured risk report.
+
+The system outputs a **threat score (0–100)**, a **vulnerability score (0–100)**, a **risk level** (LOW / MEDIUM / HIGH / CRITICAL), a plain-language summary, and step-by-step **incident response guidance** — fully structured and ready to drive any frontend.
+
+---
+
+## Architecture
+
+```
+User Input
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  InputAgent  (LLM-powered triage)                               │
+│  • Classifies input type (domain / email / phone / file / ...)  │
+│  • Extracts ALL individual targets into to_scan queue           │
+└────────────────────────────┬────────────────────────────────────┘
+                             │  to_scan: ["evil.com", "+49172...", "nginx 1.18"]
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  OrchestratorAgent  (LLM-powered adaptive supervisor)           │
+│  • Selects highest-priority target from queue (current_check)   │
+│  • Routes to correct specialist agent via next_agent            │
+│  • Rebuilds queue after each scan (relevant_targets_remaining)  │
+│  • Routes to OutputAgent when queue is empty                    │
+└──┬───────┬───────┬───────┬────────┬───────┬────────────────────┘
+   │       │       │       │        │       │
+domain   email   cve    phone    file  identity
+   │       │       │       │        │       │
+   ▼       ▼       ▼       ▼        ▼       ▼
+Domain  Email   CVE    Phone    File  Identity
+Agent   Agent   Agent  Agent    Agent Agent
+   │       │       │       │        │       │
+   └───────┴───────┴───────┴────────┴───────┘
+                             │
+                   (all agents → back to Orchestrator)
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  OutputAgent  (LLM structured output)                           │
+│  • Aggregates all Findings objects from state                   │
+│  • Produces threat_score, vulnerability_score, risk_level       │
+│  • Generates plain-language summary + incident response steps   │
+└─────────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+                          ArgusState
+                    (shared LangGraph state)
+                             │
+                             ▼
+                          ChromaDB
+                   (persistent vector store)
+```
+
+The graph is compiled with **LangGraph `StateGraph`** using conditional edges. Every specialist agent routes back to the orchestrator after completing its scan. The orchestrator fires `output` only when `to_scan` is empty — ensuring nothing is missed.
+
+---
+
+## Project Structure
+
+```
+OSINT-Argus/
+│
+├── app/
+│   ├── main.py                     # Entry point — reads input, builds state, invokes graph
+│   ├── graph.py                    # LangGraph StateGraph — nodes, edges, entry point
+│   ├── state.py                    # ArgusState TypedDict — shared state schema
+│   ├── config.py                   # Loads .env — API keys, base URL, model name
+│   │
+│   ├── agents/
+│   │   ├── base_agent.py           # Abstract BaseAgent — defines run(state) interface
+│   │   ├── input_agent.py          # Triage — classifies input & extracts all targets
+│   │   ├── orchestrator_agent.py   # Adaptive queue supervisor + LLM routing
+│   │   ├── domain_agent.py         # Domain OSINT via 6 tools + LLM JSON report
+│   │   ├── email_agent.py          # Email phishing analysis
+│   │   ├── cve_agent.py            # CVE lookup via NVD NIST API
+│   │   ├── phone_agent.py          # Phone number forensics (Vishing/Smishing)
+│   │   ├── file_agent.py           # File metadata, hash analysis + identity extraction
+│   │   ├── identity_agent.py       # Digital identity profiling (Sherlock + Holehe)
+│   │   └── output_agent.py         # Final risk report — scores, level, IR steps
+│   │
+│   ├── models/
+│   │   ├── llm.py                  # ChatOpenAI factory — configured LLM instance
+│   │   ├── agent_type.py           # AgentType enum — all registered agent identifiers
+│   │   ├── findings.py             # Findings dataclass — shared result object
+│   │   ├── file_analysis.py        # FileAnalysis Pydantic model
+│   │   └── router.py               # Pydantic models: OrchestratorDecision, OutputReport, ...
+│   │
+│   ├── memory/
+│   │   └── chroma_memory.py        # ChromaDB client — save_analysis() + search_memory()
+│   │
+│   ├── tools/
+│   │   ├── classifier.py           # Regex classifier — fast pre-routing before LLM
+│   │   ├── whois_tool.py           # WHOIS lookup — registrar, dates, name servers
+│   │   ├── dns_tool.py             # DNS records — A, MX, NS
+│   │   ├── domain_tools.py         # SSL, SPF/DMARC/DKIM, URLhaus, crt.sh
+│   │   ├── email_tools.py          # URL extraction, header parsing, VirusTotal
+│   │   ├── cve_tools.py            # NVD NIST API v2 + local mock database
+│   │   ├── phone_tools.py          # phonenumbers library + spam reputation check
+│   │   ├── file_tools.py           # pypdf, ExifTool, SHA256, VirusTotal hash check
+│   │   └── identity_tools.py       # Holehe (email) + Sherlock (username) wrappers
+│   │
+│   └── test_mails/
+│       ├── email_test.txt          # Generic phishing email
+│       ├── crit_mail_test.txt      # CRITICAL-level phishing scenario
+│       ├── legit_mail_test.txt     # Legitimate email (LOW risk baseline)
+│       ├── low_risk_test.txt       # Low-risk domain input
+│       ├── phone_test.txt          # Smishing SMS scenario
+│       └── osint_argus_review1.pdf # PDF with embedded metadata for FileAgent testing
+│
+├── .env                            # Local secrets (not committed)
+├── .env.example                    # Template for required environment variables
+├── requirements.txt                # Python dependencies
+└── README.md                       # This file
+```
+
+---
+
+## Agents
+
+### `BaseAgent` — Abstract Interface
+**File:** `app/agents/base_agent.py`
+
+Every agent inherits from `BaseAgent` and must implement one method:
+
+```python
+def run(self, state: ArgusState) -> ArgusState
+```
+
+The agent receives the full shared state, performs its analysis, appends a `Findings` object to `state["findings"]`, and returns the mutated state.
+
+---
+
+### `InputAgent` — Triage & Target Extraction
+**File:** `app/agents/input_agent.py`
+
+The entry point of every pipeline run. Uses `with_structured_output(InputExtraction)` to:
+
+1. Classify the global input type: `domain | email | url | text | phone | file | identity | unknown`
+2. Extract **all cyber-relevant targets** into `state["to_scan"]` — including embedded IPs, domains, hashes, file paths, software version strings and phone numbers from free text
+
+The InputAgent ensures only clean, isolated values enter the queue — no labels, no descriptions, no duplicate context strings.
+
+---
+
+### `OrchestratorAgent` — Adaptive Queue Supervisor
+**File:** `app/agents/orchestrator_agent.py`
+
+The central coordinator. Called after every specialist agent run. Uses `with_structured_output(OrchestratorDecision)` to:
+
+- Select the **highest-priority target** from `to_scan` (considering previous findings and risk context)
+- Assign it as `current_check` and set `next_agent` to the appropriate specialist
+- Rebuild `relevant_targets_remaining` — the LLM may prune duplicates or junk but must preserve valid hashes, names, and IPs
+- Route to `output` when the queue is empty or enough evidence is gathered
+
+**Supported routes:**
+
+| Input type | → Agent |
+|------------|---------|
+| Domain / IP / URL | `domain` |
+| Email address or raw email | `email` |
+| Software + version string | `cve` |
+| Phone number | `phone` |
+| File path or hash (MD5/SHA256) | `file` |
+| Person name / username / handle | `identity` |
+| Queue empty or analysis sufficient | `output` |
+
+**Key behaviour:** When `FileAgent` discovers an author name in PDF metadata and adds it to `to_scan`, the Orchestrator picks it up and routes it to `IdentityAgent` — demonstrating true cross-agent data flow.
+
+---
+
+### DomainAgent — Domain OSINT & Exposure Analysis
+
+**File:** `app/agents/domain_agent.py`
+
+Built on a LangChain `AgentExecutor` using `create_tool_calling_agent`.
+
+The agent receives the current target from `state["current_check"]` and uses the tools provided through `DOMAIN_TOOLS` to perform OSINT-based domain reconnaissance.
+
+The analysis focuses on:
+
+* Public DNS and domain intelligence
+* WHOIS information (if supported by the available tools)
+* SSL/TLS certificate assessment
+* Email security posture (SPF, DMARC, DKIM)
+* Malware and reputation checks (e.g. URLhaus)
+* Discovery of subdomains
+* Detection of web technologies and software versions
+
+Unlike earlier implementations, tool execution order is **not hard-coded**. The LLM dynamically decides which tools to call through LangChain's tool-calling agent framework.
+
+The agent is instructed to produce a structured JSON result:
+
+```json
+{
+  "threat_indicators": [
+    "Identified malware indicators or malicious infrastructure findings"
+  ],
+  "exposure_findings": [
+    "Misconfigurations, certificate issues, or other security weaknesses"
+  ],
+  "discovered_subdomains": [
+    "Newly identified subdomains"
+  ],
+  "discovered_technologies": [
+    "Detected technologies and versions"
+  ],
+  "summary": "Short German-language assessment of the domain."
+}
+```
+
+Detected technologies can be forwarded into the system's scan queue (`state["to_scan"]`) for downstream CVE analysis.
+
+---
+
+### EmailAgent — Email & Phishing Analysis
+
+**File:** `app/agents/email_agent.py`
+
+Built on a LangChain `AgentExecutor` using `create_tool_calling_agent`.
+
+The agent receives the current target from `state["current_check"]` and supports two analysis modes.
+
+#### Reputation Analysis Mode
+
+If the target is an email address or domain, the agent may use tools from `EMAIL_TOOLS` such as:
+
+* VirusTotal reputation checks
+* Phishing blacklist checks
+
+#### Content Analysis Mode
+
+If the target contains email message content, the agent performs an LLM-driven phishing assessment focused on:
+
+1. Authority & Scarcity indicators
+2. Impersonation quality
+3. Call-to-action anomalies
+4. Technical artefacts, encoding issues, and language inconsistencies
+
+The agent returns a structured JSON result:
+
+```json
+{
+  "threat_indicators": [
+    "Detected phishing indicators"
+  ],
+  "exposure_findings": [
+    "Technical findings such as blacklist entries or reputation issues"
+  ],
+  "summary": "Short German-language phishing assessment."
+}
+```
+
+The current implementation does not explicitly parse email headers, extract URLs, or detect Reply-To mismatches within the agent code itself. Such functionality depends on the tools available through `EMAIL_TOOLS`.
+
+
+---
+
+### `PhoneAgent` — Telecommunications Forensics
+**File:** `app/agents/phone_agent.py`
+
+Analyses phone numbers for Vishing (voice phishing) and Smishing (SMS phishing) indicators using two tools:
+
+1. `parse_and_validate_phone` — validates structure, derives E.164 format, detects line type (MOBILE / VOIP / LANDLINE)
+2. `check_phone_reputation` — queries spam/phishing reputation feeds for abuse reports and spam score
+
+VOIP numbers receive elevated risk weighting due to their prevalence in call-ID spoofing attacks.
+
+---
+
+### `FileAgent` — File Metadata & Hash Analysis
+**File:** `app/agents/file_agent.py`
+
+Handles both **file paths** (local documents) and **standalone hashes** (MD5 / SHA256).
+
+**Analysis steps:**
+1. `extract_universell_document_metadata` — uses `pypdf` for PDFs, falls back to `ExifTool` for all other types. Extracts authors, usernames, company names, internal hostnames, UNC paths, build system artefacts.
+2. `check_file_hash_virustotal` — submits any found or passed hashes to VirusTotal v3 for malware detection.
+3. LLM analysis via `with_structured_output(FileAnalysis)` — identifies malware indicators and metadata leaks.
+
+**Cross-agent data flow:** If the LLM detects person names (e.g. document authors), the FileAgent appends them to `state["to_scan"]` — the Orchestrator then automatically routes them to `IdentityAgent`.
+
+---
+
+### `IdentityAgent` — Digital Identity Profiling
+**File:** `app/agents/identity_agent.py`
+
+Profiles the digital footprint of a person or username for **Spear-Phishing risk assessment**.
+
+**Logic branches:**
+- **Email address as input:** runs `check_email_with_holehe` (platform registration check) + `search_username_with_sherlock` on the local part
+- **Name or handle as input:** runs `search_username_with_sherlock` directly with a normalised handle
+
+The LLM then assesses:
+- Which platforms increase Spear-Phishing exposure (GitHub → reveals tech stack, LinkedIn → reveals employer role)
+- Correlation between found profiles
+- What pretext lines an attacker could construct
+
+---
+
+### `OutputAgent` — Final Risk Report
+**File:** `app/agents/output_agent.py`
+
+The terminal agent. Collects all `Findings` objects from `state["findings"]`, formats them into a structured prompt, and uses `with_structured_output(OutputReport)` to produce a fully typed report.
+
+**Output written to state:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `threat_score` | `int` (0–100) | Active threat level — known malicious actors, exploits, active campaigns |
+| `vulnerability_score` | `int` (0–100) | Exposure level — missing SPF, expired certs, public CVEs |
+| `risk_level` | `"LOW" \| "MEDIUM" \| "HIGH" \| "CRITICAL"` | Combined risk classification |
+| `summary` | `str` | Plain-language summary for end users (no jargon) |
+| `explanation` | `str` | Technical explanation for security experts (3–5 sentences) |
+| `action_prevent` | `str` | Preventive recommendation — what to do right now |
+| `action_incident_response` | `List[str]` | Step-by-step IR checklist if the user already clicked / interacted |
+| `indicators` | `List[str]` | Top risk factors (max 10) |
+
+**Traffic-light mapping:**
+
+| Score | Level | Meaning |
+|-------|-------|---------|
+| 0–33 | LOW | 🟢 No action needed |
+| 34–66 | MEDIUM | 🟡 Proceed with caution |
+| 67–84 | HIGH | 🔴 Action recommended |
+| 85–100 | CRITICAL | 🚨 Act immediately |
+
+---
+
+## Tools
+
+All tools are registered as **LangChain `@tool`** decorated functions and are assigned to agent executors via tool lists.
+
+### `run_whois` — WHOIS Lookup
+**File:** `app/tools/whois_tool.py`
+
+Returns registrar, creation date, expiration date, and name servers. Freshly registered domains (< 30 days) are a primary phishing indicator.
+
+---
+
+### `run_dns_lookup` — DNS Records
+**File:** `app/tools/dns_tool.py`
+
+Resolves `A`, `MX`, and `NS` records via `dnspython`. Missing MX records on a domain sending email is a spoofing indicator.
+
+---
+
+### `run_ssl_check` — TLS Certificate Analysis
+**File:** `app/tools/domain_tools.py`
+
+Direct TLS handshake on port 443 using Python's `ssl` module with `certifi`. Detects expired certs, upcoming expiry (14 / 30 days), self-signed certs, and TLS interception (Cloudflare, Myra WAF).
+
+**Verdicts:** `OK` | `WARNING` | `CRITICAL` | `UNKNOWN`
+
+---
+
+### `run_spf_dmarc_check` — Email Security Posture
+**File:** `app/tools/domain_tools.py`
+
+Checks SPF (`TXT` record), DMARC (`_dmarc.<domain>`), and DKIM (probes 7 common selectors). A missing or permissive configuration means the domain can be spoofed in outbound email.
+
+**Verdicts:** `SECURE` | `EXPOSED`
+
+---
+
+### `run_urlhaus` — Malware Database Check
+**File:** `app/tools/domain_tools.py`
+
+Queries the **URLhaus API** (abuse.ch) — no API key required. Returns active malicious URL count, malware family tags, and blacklist status.
+
+**Verdicts:** `CLEAN` | `MALICIOUS` | `UNKNOWN`
+
+---
+
+### `run_crtsh` — Subdomain Enumeration
+**File:** `app/tools/domain_tools.py`
+
+Queries `crt.sh` Certificate Transparency logs. Returns up to 20 unique subdomains. Domains with more than 15 subdomains are flagged as elevated attack surface.
+
+---
+
+### `search_nvd_cves` — CVE Lookup
+**File:** `app/tools/cve_tools.py`
+
+Queries the NVD NIST API v2 with the technology string. Returns top 5 CVEs with CVSS score, severity and description. Includes a local mock database for offline/rate-limited scenarios.
+
+---
+
+### `parse_and_validate_phone` + `check_phone_reputation`
+**File:** `app/tools/phone_tools.py`
+
+- `parse_and_validate_phone`: validates via `google-phonenumbers`, returns E.164 format and line type
+- `check_phone_reputation`: checks against spam and Smishing reputation feeds; VOIP numbers receive automatic flag
+
+---
+
+### `extract_universell_document_metadata` + `check_file_hash_virustotal`
+**File:** `app/tools/file_tools.py`
+
+- `extract_universell_document_metadata`: tries `pypdf` for PDFs, falls back to `ExifTool` subprocess for all other types
+- `calculate_sha256`: computes file hash for VirusTotal submission
+- `check_file_hash_virustotal`: VirusTotal v3 hash reputation check (requires `VT_API_KEY`)
+
+---
+
+### `check_email_with_holehe` + `search_username_with_sherlock`
+**File:** `app/tools/identity_tools.py`
+
+- `check_email_with_holehe`: wraps the Holehe framework to check platform registrations for an email address
+- `search_username_with_sherlock`: wraps Sherlock to enumerate social media profiles for a username handle across 400+ platforms
+
+---
+
+## State & Routing
+
+### `ArgusState` — Shared Graph State
+**File:** `app/state.py`
+
+```python
+class ArgusState(TypedDict):
+    user_input:     str                  # Raw input from the user
+    input_type:     str                  # Global type — domain / email / phone / file / ...
+    current_agent:  str                  # Currently active agent
+    next_agent:     str                  # Routing decision by Orchestrator
+    findings:       List[Findings]       # All Findings objects from all agents
+    memory_context: Optional[str]        # ChromaDB RAG context (future use)
+    to_scan:        List[str]            # Remaining targets in the queue
+    scanned:        List[str]            # Already completed targets
+    current_check:  Optional[str]        # Target currently being analysed
+    file_paths:     List[str]            # Extracted file paths (for FileAgent)
+    file_hashes:    List[str]            # Extracted hashes (for VirusTotal)
+```
+
+### `Findings` — Shared Result Object
+**File:** `app/models/findings.py`
+
+```python
+@dataclass
+class Findings:
+    agent:            AgentType      # Which agent produced this finding
+    input:            str            # The target that was analysed
+    threat_sum:       List[str]      # Active threat indicators
+    vulnerability_sum: List[str]     # Exposure / misconfiguration findings
+```
+
+### `OrchestratorDecision` — Routing Model
+**File:** `app/models/router.py`
+
+```python
+class OrchestratorDecision(BaseModel):
+    next_agent:                  Literal["domain", "email", "cve", "phone", "file", "identity", "output"]
+    current_check:               Optional[str]   # Exact target from to_scan to process now
+    relevant_targets_remaining:  List[str]        # Pruned queue for next iteration
+    reasoning:                   str              # Strategic justification
+```
+
+### `OutputReport` — Final Report Model
+**File:** `app/models/router.py`
+
+```python
+class OutputReport(BaseModel):
+    threat_score:             int                                           # 0–100
+    vulnerability_score:      int                                           # 0–100
+    risk_level:               Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    explanation:              str                                           # Technical, for experts
+    summary:                  str                                           # Plain language, for users
+    action_prevent:           str                                           # Preventive recommendation
+    action_incident_response: List[str]                                     # Step-by-step IR checklist
+    indicators:               List[str]                                     # Top risk factors (max 10)
+```
+
+### `AgentType` Enum
+**File:** `app/models/agent_type.py`
+
+```python
+class AgentType(str, Enum):
+    INPUT        = "input"
+    ORCHESTRATOR = "orchestrator"
+    DOMAIN       = "domain"
+    EMAIL        = "email"
+    CVE          = "cve"
+    PHONE        = "phone"
+    FILE         = "file"
+    IDENTITY     = "identity"
+    OUTPUT       = "output"
+```
+
+---
+
+## Memory (ChromaDB)
+
+**File:** `app/memory/chroma_memory.py`
+
+Persistent ChromaDB client stored in `./chroma_db/`. The collection `argus_memory` stores past analysis results as vector documents, enabling **Retrieval-Augmented Generation (RAG)** context injection in future runs.
+
+```python
+save_analysis(query="example.com", content="<full analysis JSON>")
+results = search_memory(query="example.com")  # top 3 nearest neighbours
+```
+
+---
+
+## Setup
+
+### Prerequisites
+
+- Python 3.11+
+- Access to an OpenAI-compatible API (e.g. [SAIA / German Academic Cloud](https://chat-ai.academiccloud.de))
+- `ExifTool` installed system-wide (required for non-PDF file metadata extraction)
+- Optional: VirusTotal API key — required for `FileAgent` hash checks and `EmailAgent` domain reputation
+
+### Installation
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/<your-username>/OSINT-Argus.git
+cd OSINT-Argus
+
+# 2. Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Set up environment variables
+cp .env.example .env
+# Edit .env with your actual API keys
+```
+
+---
+
+## Configuration
+
+```env
+# Required — OpenAI-compatible LLM API
+OPENAI_API_KEY=your_api_key_here
+OPENAI_BASE_URL=https://chat-ai.academiccloud.de/v1
+MODEL_NAME=mistral-large-instruct
+
+# Required for FileAgent hash checks and EmailAgent reputation
+VT_API_KEY=your_virustotal_key
+```
+
+**Notes:**
+- `OPENAI_BASE_URL` accepts any OpenAI-compatible endpoint. Developed and tested against the **German Academic Cloud (SAIA)**.
+- Compatible with `gpt-4o`, `mistral-large-instruct`, or any local model via LM Studio / Ollama.
+- `VT_API_KEY` free tier is sufficient for all current agent use cases.
+
+---
+
+## Running the App
+
+```bash
+python -m app.main
+```
+
+```
+╔══════════════════════════════════════════════╗
+║       👁️  OSINT-Argus Multi-Agent            ║
+║   Domain · Email · CVE · Phone · File        ║
+║      Identity · RAG Memory · LangGraph       ║
+╚══════════════════════════════════════════════╝
+
+📝 Eingabe (leere Zeile zum Abschließen):
+```
+
+Multi-line input is supported — paste a full email with headers, then press Enter on an empty line to submit. For pipe mode, EOF is handled automatically.
+
+```bash
+cat app/test_mails/crit_mail_test.txt | python -m app.main
+```
+
+**Supported inputs:**
+
+| Input | Routed to | Notes |
+|-------|-----------|-------|
+| `example.com` | DomainAgent | Full 6-tool OSINT scan |
+| Raw email with headers | EmailAgent | Header parse + domain scans |
+| `+49172...` | PhoneAgent | Vishing/Smishing check |
+| `/path/to/file.pdf` | FileAgent | Metadata + VirusTotal |
+| `e3b0c44...` (hash) | FileAgent | Direct VirusTotal hash lookup |
+| `nginx 1.18.0` | CVEAgent | NVD CVE lookup |
+| `John Doe` / `johndoe` | IdentityAgent | Sherlock + Holehe profile scan |
+| Mixed input (email with embedded domains, hashes, phone numbers) | All relevant agents | InputAgent extracts all targets |
+
+---
+
+## Example Output
+
+### Domain Scan — `example.com`
+
+```
+🧠 [Orchestrator] Route → domain | Target: 'example.com'
+🔍 [DomainAgent] Starte Analyse für: example.com ...
+
+═══════════════════════════════════════════════════════════
+  👁️  OSINT-Argus Risikobericht
+═══════════════════════════════════════════════════════════
+  Threat-Score      : 5 / 100
+  Vulnerability-Score: 22 / 100
+  Risiko-Level      : LOW
+
+  Zusammenfassung:
+    Diese Domain ist eine IANA-Reservierungsdomain und wird
+    ausschließlich für Dokumentationszwecke genutzt.
+
+  🛡️  Prävention:
+    Keine Aktion erforderlich. Diese Domain ist unbedenklich.
+
+  ⚠️  Indikatoren:
+     • Kein SPF-Record konfiguriert
+     • Kein DMARC-Record vorhanden
+═══════════════════════════════════════════════════════════
+```
+
+### Critical Phishing Email
+
+```
+📥 [InputAgent] Typ: EMAIL | 4 Targets extrahiert
+🧠 [Orchestrator] Route → email | Target: 'paypa1-verify.ru'
+🧠 [Orchestrator] Route → domain | Target: 'paypa1-verify.ru'
+🧠 [Orchestrator] Route → identity | Target: 'support@paypa1-verify.ru'
+
+═══════════════════════════════════════════════════════════
+  🚨  OSINT-Argus Risikobericht
+═══════════════════════════════════════════════════════════
+  Threat-Score      : 97 / 100
+  Vulnerability-Score: 61 / 100
+  Risiko-Level      : CRITICAL
+
+  Zusammenfassung:
+    Klassische PayPal-Phishing-Mail. Absender-Domain als
+    MALICIOUS (VirusTotal) eingestuft, Reply-To Mismatch,
+    Dringlichkeitstaktik und Impersonation erkannt.
+
+  🛡️  Prävention:
+    Klicke keine Links. Öffne keine Anhänge. Lösche die Mail.
+
+  🚑  Incident Response:
+    1. Netzwerkverbindung unterbrechen
+    2. Passwort des betroffenen Accounts sofort ändern
+    3. Zwei-Faktor-Authentifizierung aktivieren
+    4. IT-Sicherheitsabteilung informieren
+    5. Mail als Phishing an den Provider melden
+
+  ⚠️  Indikatoren:
+     • paypa1-verify.ru als MALICIOUS klassifiziert (VirusTotal)
+     • Reply-To Mismatch: account-helpdesk.xyz ≠ Absender-Domain
+     • Dringlichkeitstaktik: Kontosperrung in 24h angedroht
+     • Impersonation: PayPal-Sicherheitsteam vorgespiegelt
+     • Neu registrierte Domain (< 7 Tage)
+═══════════════════════════════════════════════════════════
+```
+
+---
+
+## Tech Stack
+
+| Component | Technology | Notes |
+|-----------|-----------|-------|
+| Agent orchestration | [LangGraph](https://github.com/langchain-ai/langgraph) | `StateGraph` with conditional edges |
+| LLM tooling | [LangChain](https://github.com/langchain-ai/langchain) | `AgentExecutor`, `with_structured_output` |
+| LLM provider | OpenAI-compatible API | Developed on SAIA / Academic Cloud |
+| Default model | `mistral-large-instruct` | Also tested with `gpt-4o` |
+| Vector store | [ChromaDB](https://www.trychroma.com/) | Persistent `argus_memory` collection |
+| Schema validation | `pydantic` v2 | All routing and output models |
+| WHOIS | `python-whois` | Domain registration metadata |
+| DNS resolution | `dnspython` | A, MX, NS records |
+| Phone analysis | `google-phonenumbers` | E.164 validation + line type |
+| PDF metadata | `pypdf` | Native Python, no subprocess |
+| Universal metadata | `ExifTool` | CLI subprocess for non-PDF types |
+| HTTP client | `httpx` | Async-ready, used across all tools |
+| TLS inspection | Python `ssl` + `certifi` | Direct socket handshake |
+| Config management | `python-dotenv` | `.env` loading |
+
+---
+
+## License
+
+MIT — see `LICENSE` for details.
+
+---
+
+*OSINT-Argus is an academic project developed as part of an Agentic AI course. It is intended for educational and defensive security research purposes only.*
+</file>
+
+<file path="requirements.txt">
+langgraph
+langchain
+langchain-core
+langchain-community
+langchain-openai
+chromadb
+python-dotenv
+python-whois
+dnspython
+pydantic
+certifi
+httpx
+phonenumbers
+pypdf
+pyexiftool
+streamlit
+</file>
+
 <file path="app/graph.py">
 from langgraph.graph import StateGraph, END
 from app.agents.cve_agent import CVEAgent
@@ -3547,7 +3857,6 @@ from app.agents.orchestrator_agent import OrchestratorAgent
 from app.agents.domain_agent import DomainAgent
 from app.agents.email_agent import EmailAgent
 from app.agents.input_agent import InputAgent
-from app.agents.leak_agent import LeakAgent
 
 orchestrator = OrchestratorAgent()
 domain_agent  = DomainAgent()
@@ -3558,7 +3867,6 @@ cve_agent = CVEAgent()
 phone_agent = PhoneAgent()
 file_agent = FileAgent()
 identity_agent = IdentityAgent()
-leak_agent = LeakAgent()
 
 builder = StateGraph(ArgusState)
 
@@ -3567,12 +3875,11 @@ builder.add_node("orchestrator", orchestrator.run)
 builder.add_node("domain",       domain_agent.run)
 builder.add_node("email",        email_agent.run)
 builder.add_node("output",        output_agent.run)
-builder.add_node("cve",             cve_agent.run)
-builder.add_node("file",            file_agent.run)
-builder.add_node ("input",          input_agent.run)
-builder.add_node("phone",           phone_agent.run)
-builder.add_node("identity",    identity_agent.run)
-builder.add_node("leak",                leak_agent)
+builder.add_node("cve", cve_agent.run)
+builder.add_node("file", file_agent.run)
+builder.add_node ("input", input_agent.run)
+builder.add_node("phone", phone_agent.run)
+builder.add_node("identity", identity_agent.run)
 # ── Entry ──────────────────────────────────────────────────────────────────
 builder.set_entry_point("input")
 
@@ -3587,8 +3894,7 @@ builder.add_conditional_edges(
         "output": "output",   
         "phone": "phone",   
         "file": "file", 
-        "identity": "identity",
-        "leak": "leak"
+        "identity": "identity"
     },
 )
 
@@ -3601,7 +3907,6 @@ builder.add_edge("input", "orchestrator")
 builder.add_edge("phone", "orchestrator")
 builder.add_edge("file", "orchestrator")
 builder.add_edge("identity", "orchestrator")
-builder.add_edge("leak", "output")
 
 graph = builder.compile()
 </file>
