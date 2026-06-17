@@ -10,3 +10,4 @@ class AgentType(str, Enum):
     OUTPUT = "output"
     FILE = "file"
     IDENTITY = "identity"
+    LEAK = "leak"

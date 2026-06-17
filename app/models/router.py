@@ -113,3 +113,9 @@ class OutputReport(BaseModel):
         description="Die wichtigsten Risikoindikatoren als kurze Stichpunkte (max 10)",
         max_length=10
     )
+
+class ExecutiveSummary(BaseModel):
+    headline: str = Field(description="Eine knackige, alarmierende oder beruhigende Punchline (max. 1 Satz)")
+    digital_footprint_summary: str = Field(description="Zusammenfassung der gefundenen digitalen Identität und deren Sichtbarkeit")
+    primary_threat_vector: str = Field(description="Der gefährlichste Angriffsvektor (z.B. Kombination aus GitHub-Stack und geleaktem Passwort)")
+    action_items: list[str] = Field(description="Die 3 wichtigsten, priorisierten Handlungsschritte für das Target")

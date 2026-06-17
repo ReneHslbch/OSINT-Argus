@@ -1,9 +1,11 @@
+# app/agents/input_agent.py
 import json
 from pydantic import BaseModel, Field
-from typing import Literal, List
+from typing import Literal, List, Optional
 from app.agents.base_agent import BaseAgent
 from app.state import ArgusState
 from app.models.llm import get_llm
+from app.memory.chroma_memory import get_user_profile, save_user_profile
 
 class InputExtraction(BaseModel):
     input_type: Literal["domain", "email", "text", "phone", "file", "identity", "unknown"] = Field(
@@ -13,10 +15,24 @@ class InputExtraction(BaseModel):
         description="Liste aller extrahierten Entitäten, die gescannt werden müssen (E-Mail-Adressen, Domains, IPs, Telefonnummern, Software-Namen, Identitäten, Hashes oder Dateipfade)."
     )
 
+# NEU: Pydantic Modell für das Text-Profiling (Schritt 2)
+class ProfileUpdate(BaseModel):
+    extracted_vorname: Optional[str] = Field(None, description="In der Mail/Text genannter Vorname des Absenders oder Empfängers (falls erkennbar uns zuzuordnen).")
+    extracted_nachname: Optional[str] = Field(None, description="In der Mail/Text genannter Nachname (z.B. 'Mustermann' aus 'Hallo Herr Mustermann').")
+    extracted_email: Optional[str] = Field(None, description="Die mutmaßliche E-Mail-Adresse des Users, falls im Textkontext als seine identifiziert.")
+    extracted_telefon: Optional[str] = Field(None, description="Die Telefonnummer des Users, falls im Textkontext als seine identifiziert.")
+    kompetenz_level: Literal["LAIE", "GEBILDET", "EXPERTE", "UNVERÄNDERT"] = Field(
+        description="Beweist der Text IT-Fachwissen? 'EXPERTE' bei Begriffen wie SubCAs, RSA, OCSP, etc. 'LAIE' bei trivialem Text."
+    )
+    neue_fachbegriffe: List[str] = Field([], description="Liste neu gefundener IT-Fachbegriffe im Text (z.B. ['OCSP-Responder', 'RSA'])." )
+    begruendung: str = Field(description="Kurze Begründung, warum der User so eingestuft wurde.")
+
+
 class InputAgent(BaseAgent):
     def __init__(self):
-        # Wir zwingen das LLM, strukturiert zu antworten
         self.llm = get_llm().with_structured_output(InputExtraction)
+        # NEU: Separater strukturierter LLM-Aufruf für das Profiling
+        self.profiler_llm = get_llm().with_structured_output(ProfileUpdate)
 
     def run(self, state: ArgusState) -> ArgusState:
         user_input = state["user_input"]
@@ -29,30 +45,69 @@ Deine Aufgabe ist es, den rohen Benutzer-Input zu analysieren und strukturierte 
 2. Extrahiere alle cyber-relevanten Einzel-Targets für die 'to_scan'-Liste des Orchestrators:
    - IPs, Domains, URLs, E-Mail-Adressen und Telefonnummern.
    - Software-Zustände (z.B. 'nginx 1.18', 'Apache 2.4').
-   - Krypto-Hashes (MD5, SHA1, SHA256) und vollständige lokale Dateipfade (z.B. 'C:\\Ordner\\datei.pdf' oder '/var/log/syslog').
+   - Krypto-Hashes (MD5, SHA1, SHA256) und vollständige lokale Dateipfade (z.B. 'C:\\Ordner\\datei.pdf').
 
 WICHTIGE EXTRAKTIONS-REGELN:
-- Extrahiere NUR den nackten, bereinigten Wert der Entität.
-- Füge NIEMALS erklärenden Text, Labels oder Beschreibungen in ein Target ein. 
-  * Falsch: "MD5-Hash (Datei-Indikator)" oder "SHA256: e3b0c4..."
-  * Richtig: "e3b0c4..." (nur der Hash selbst)
-- Wenn der Input eine E-Mail oder ein längerer Text ist, durchsuche den gesamten Text akribisch nach eingebetteten Hashes, IP-Adressen und Dateipfaden und nimm sie alle als separate, isolierte Elemente in die Liste auf."""
+- Extrahiere NUR den nackten, bereinigten Wert der Entität. No Labels!"""
 
-        # LLM aufrufen
+        # 1. Normale Extraktion ausführen
         extraction: InputExtraction = self.llm.invoke([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Analysiere folgenden Input und extrahiere alle Einzel-Targets sauber:\n\n{user_input}"}
         ])
 
-        # State initialisieren und befüllen
         state["input_type"] = extraction.input_type
         state["to_scan"] = extraction.extracted_targets
         state["scanned"] = []
         state["current_check"] = None
 
         print(f"\n📥 [InputAgent] Globaler Typ erkannt: {extraction.input_type.upper()}")
-        print(f"🎯 [InputAgent] {len(extraction.extracted_targets)} Targets extrahiert für den Orchestrator:")
-        for target in extraction.extracted_targets:
-            print(f"  → {target}")
+        print(f"🎯 [InputAgent] {len(extraction.extracted_targets)} Targets extrahiert.")
+
+        # ==============================================================================
+        # NEU: LERNENDES NUTZERPROFIL GENERIEREN (SCHRITT 2)
+        # ==============================================================================
+        if extraction.input_type in ["text", "email"] or len(user_input) > 40:
+            print("🧠 [InputAgent] Analysiere Textkontext für Benutzerprofilierung...")
+            
+            # Bestehendes Profil aus ChromaDB laden
+            current_profile = get_user_profile()
+            
+            profiler_prompt = """Du bist ein High-End Profiler für Social Engineering und Operational Security.
+Deine Aufgabe ist es, aus dem eingegebenen Freitext (z.B. einer kopierten Mail) Identitätsmerkmale und das technische Kompetenz-Level des Nutzers zu extrahieren.
+
+Achte penibel auf Anreden: 
+- Wenn dort steht "Hallo Herr Mustermann" oder "Sehr geehrter Herr René Haselbach", extrahiere die Namen.
+- Analysiere das IT-Fachwissen: Werden Fachbegriffe wie 'OCSP', 'SubCAs', 'Drei-Tier-Architektur', 'Zertifikatsfehler' verwendet? Dann ist das Kompetenzlevel EXPERTE.
+- Ist es eine Standard-Spam Mail ohne technisches Zutun des Nutzers, bleibe bei LAIE oder GEBILDET."""
+
+            try:
+                update: ProfileUpdate = self.profiler_llm.invoke([
+                    {"role": "system", "content": profiler_prompt},
+                    {"role": "user", "content": f"Aktuelles Profil: {current_profile}\n\nNeuer Input-Text:\n{user_input}"}
+                ])
+                
+                # Werte intelligent mergen (Überschreiben nur, wenn neue Infos gefunden wurden)
+                if update.extracted_vorname: current_profile["vorname"] = update.extracted_vorname
+                if update.extracted_nachname: current_profile["nachname"] = update.extracted_nachname
+                if update.extracted_email: current_profile["email"] = update.extracted_email
+                if update.extracted_telefon: current_profile["telefon"] = update.extracted_telefon
+                
+                if update.kompetenz_level != "UNVERÄNDERT":
+                    current_profile["kompetenz_level"] = update.kompetenz_level
+                
+                # Fachbegriffe ohne Duplikate anfügen
+                for word in update.neue_fachbegriffe:
+                    if word not in current_profile["fachbegriffe"]:
+                        current_profile["fachbegriffe"].append(word)
+                        
+                current_profile["charakteristik"] = update.begruendung
+                
+                # Zurück in die ChromaDB schreiben
+                save_user_profile(current_profile)
+                print(f"✅ [InputAgent] Profil aktualisiert: {current_profile['vorname']} {current_profile['nachname']} ({current_profile['kompetenz_level']})")
+                
+            except Exception as e:
+                print(f"⚠️ [InputAgent] Profiling fehlgeschlagen: {e}")
 
         return state
