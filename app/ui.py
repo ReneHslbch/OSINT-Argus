@@ -158,14 +158,6 @@ def run_with_live_log(user_input: str):
             log_rows.append((node_name, target, False))
             render_log()
 
-            # DEBUG — print what each node actually returns
-            if node_name == "output":
-                print(f"\n🔍 DEBUG output node keys: {list(node_state.keys())}")
-                print(f"🔍 DEBUG risk_level = {node_state.get('risk_level')!r}")
-                print(f"🔍 DEBUG risk_score = {node_state.get('risk_score')!r}")
-                print(f"🔍 DEBUG summary    = {str(node_state.get('summary',''))[:80]!r}")
-                print(f"🔍 DEBUG action_adv = {str(node_state.get('action_advice',''))[:80]!r}")
-
             # Merge scalars
             for key in ("risk_score", "risk_level", "summary", "action_advice",
                         "input_type", "memory_context", "next_agent", "current_check"):
@@ -194,26 +186,35 @@ def run_with_live_log(user_input: str):
 # ── Helpers for extracting OutputAgent report from findings ───────────────────
 def extract_output_report(findings: list) -> dict:
     """
-    Pull threat_score, vuln_score, and indicators out of the ORCHESTRATOR
-    summary finding that OutputAgent appends.
+    OutputAgent appends a Findings object with:
+      threat_sum = ["Threat Score: 95", "Level: CRITICAL"]
+      vulnerability_sum = ["Vulnerability Score: 85", "indicator1", ...]
+    We parse those — because stream_mode="updates" only returns keys in
+    ArgusState TypedDict, and risk_level/risk_score are missing from it.
     """
     threat_score = vuln_score = None
-    indicators = []
+    risk_level   = None
+    indicators   = []
 
     for f in findings:
-        agent_val = str(getattr(getattr(f, "agent", ""), "value", ""))
-        if agent_val != "orchestrator":
-            continue
+        agent_val  = str(getattr(getattr(f, "agent", ""), "value", ""))
         threat_sum = getattr(f, "threat_sum", [])
         vuln_sum   = getattr(f, "vulnerability_sum", [])
-        # Only the OutputAgent summary has "Threat Score:" in threat_sum
+
+        if agent_val != "orchestrator":
+            continue
         if not any("Threat Score" in str(t) for t in threat_sum):
             continue
+
         for t in threat_sum:
             s = str(t)
             if "Threat Score" in s:
                 try: threat_score = int(s.split(":")[-1].strip())
                 except: pass
+            if "Level" in s:
+                try: risk_level = s.split(":")[-1].strip()
+                except: pass
+
         for v in vuln_sum:
             s = str(v)
             if "Vulnerability Score" in s:
@@ -222,21 +223,32 @@ def extract_output_report(findings: list) -> dict:
             else:
                 indicators.append(s)
 
-    return {"threat_score": threat_score, "vuln_score": vuln_score, "indicators": indicators}
+    return {
+        "threat_score": threat_score,
+        "vuln_score":   vuln_score,
+        "risk_level":   risk_level,
+        "indicators":   indicators,
+    }
 
 
 # ── Render results ────────────────────────────────────────────────────────────
 def render_results(result: dict):
-    risk_level = result.get("risk_level") or "UNKNOWN"
-    risk_score = int(result.get("risk_score") or 0)
-    summary    = result.get("summary") or ""
-    action_adv = result.get("action_advice") or ""
     findings   = result.get("findings") or []
 
+    # Extract everything from the OutputAgent findings object —
+    # stream_mode="updates" does NOT return risk_level/risk_score/summary/action_advice
+    # because they are missing from ArgusState TypedDict.
     report = extract_output_report(findings)
-    threat_score = report["threat_score"] if report["threat_score"] is not None else risk_score
-    vuln_score   = report["vuln_score"]   if report["vuln_score"]   is not None else risk_score
+
+    threat_score = report["threat_score"] or 0
+    vuln_score   = report["vuln_score"]   or 0
+    risk_level   = report["risk_level"]   or result.get("risk_level") or "UNKNOWN"
+    risk_score   = max(threat_score, vuln_score)
     indicators   = report["indicators"]
+
+    # summary and action_advice: try state first, then fall back to findings text
+    summary    = result.get("summary") or ""
+    action_adv = result.get("action_advice") or ""
 
     st.markdown("---")
 
