@@ -6,7 +6,7 @@ from app.state import ArgusState
 from app.models.llm import get_llm
 
 class InputExtraction(BaseModel):
-    input_type: Literal["domain", "email", "url", "text", "phone", "file", "identity", "unknown"] = Field(
+    input_type: Literal["domain", "email", "text", "phone", "file", "identity", "unknown"] = Field(
         description="Der primäre Typ des empfangenen Gesamt-Inputs."
     )
     extracted_targets: List[str] = Field(
@@ -24,7 +24,7 @@ class InputAgent(BaseAgent):
         system_prompt = """Du bist der InputAgent (Triage) von OSINT-Argus.
 Deine Aufgabe ist es, den rohen Benutzer-Input zu analysieren und strukturierte Angriffsziele (Targets) zu extrahieren.
 
-1. Bestimme den globalen Typ des Inputs. Nutze strikt einen dieser Werte: 'domain', 'email', 'url', 'text', 'phone', 'file', 'identity', 'unknown'.
+1. Bestimme den globalen Typ des Inputs. Nutze strikt einen dieser Werte: 'domain', 'email', 'text', 'phone', 'file', 'identity', 'unknown'.
 
 2. Extrahiere alle cyber-relevanten Einzel-Targets für die 'to_scan'-Liste des Orchestrators:
    - IPs, Domains, URLs, E-Mail-Adressen und Telefonnummern.

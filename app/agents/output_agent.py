@@ -6,6 +6,7 @@ from app.state import ArgusState
 from app.models.llm import get_llm
 from app.models.findings import Findings
 from app.models.agent_type import AgentType
+from app.memory.chroma_memory import save_analysis
 
 llm = get_llm()
 
@@ -100,6 +101,23 @@ class OutputAgent(BaseAgent):
         )
         state["findings"].append(final_finding)
 
+        report_content = f"""
+            Risk Level: {report.risk_level}
+            Threat Score: {report.threat_score}
+            Vulnerability Score: {report.vulnerability_score}
+
+            Summary:
+            {report.summary}
+
+            Indicators:
+            {chr(10).join(report.indicators)}
+            """
+
+        save_analysis(
+                query=state.get("user_input", ""),
+                content=report_content
+            )
+
         # ── Ausgabe im Terminal ──────────────────────────────────────────────
         self._print_custom_report(report)
 
@@ -129,3 +147,4 @@ class OutputAgent(BaseAgent):
         for ind in report.indicators:
             print(f"     • {ind}")
         print("═" * 60 + "\n")
+        
