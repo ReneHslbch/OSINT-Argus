@@ -16,21 +16,24 @@ Analysiere die Findings aus zwei Blickwinkeln:
 1. Threat Score (0-100): Gibt es Anzeichen für aktive Angreifer, Phishing-Absichten, Malware (URLhaus) oder böswillige Absichten?
 2. Vulnerability Score (0-100): Gibt es offene Flanken? (Fehlendes SPF/DMARC, abgelaufenes SSL, bekannte Software-CVEs)?
 
+KALIBRIERUNGS- UND SCORING-REGELN (Score-Sensitivität reduzieren):
+- EXPLIZITE SCORE-ANKER: Fehlende DNS-Infrastruktur-Records dürfen nicht übergewichtet werden. Ein fehlender SPF-Record erhöht den Vulnerability Score um maximal +15 Punkte (nicht +50). Ein fehlender DMARC-Record erhöht den Vulnerability Score um maximal +10 Punkte.
+- FEHLER-NEUTRALITÄT: Tool-Fehler, API-Timeouts und "UNKNOWN"-Verdicts fließen NICHT negativ in die Scores ein und erhöhen die Scores explizit um 0 Punkte. Sie sind vollkommen neutral zu behandeln.
+- HARTE CRITICAL-ANFORDERUNG: Das risk_level 'CRITICAL' erfordert zwingend mindestens einen aktiven Malware- oder Phishing-Befund (z. B. aus URLhaus, VirusTotal mit Malicious Hits > 0, oder einer verifizierten Phishing-Blacklist) — fehlende Records oder reine Konfigurationsfehler alleine reichen für CRITICAL nicht aus (hier maximal MEDIUM oder HIGH vergeben).
+
 Leite daraus das risk_level ab:
 - LOW (Scores vorwiegend < 33)
 - MEDIUM (Scores vorwiegend 34-66)
 - HIGH (Scores vorwiegend 67-84)
-- CRITICAL (Scores vorwiegend 85-100 oder akuter Phishing/Malware-Befund)
+- CRITICAL (Scores vorwiegend 85-100 UND zwingend ein akuter, aktiver Phishing/Malware-Befund vorhanden)
 
 WICHTIG FÜR DIE HANDLUNGSANWEISUNGEN:
 - Formuliere in 'action_prevent' eine klare Warnung, was auf KEINEN Fall getan werden darf (z.B. 'Nicht auf Links klicken, da...').
 - Erstelle in 'action_incident_response' eine klare, chronologische 1., 2., 3.-Schritt-Anleitung für den Fall, DASS der Nutzer bereits auf den Link geklickt, die Datei geöffnet oder mit dem Absender interagiert hat.
 
 Regeln:
-- Tool-Fehler/Timeouts fließen NICHT negativ in die Scores ein.
 - Nutze nur explizit beobachtete Fakten aus den Findings. Erfinde nichts.
 """
-
 def _format_findings_for_llm(state: ArgusState) -> str:
     """Extrahiert Daten direkt aus den Attributen der neuen Findings-Dataclass."""
     if not state.get("findings"):

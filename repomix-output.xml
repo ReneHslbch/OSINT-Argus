@@ -78,7 +78,13 @@ app/tools/file_tools.py
 app/tools/identity_tools.py
 app/tools/leak_tools.py
 app/tools/phone_tools.py
-app/ui.py
+app/ui_main.py
+app/ui/analyse_tab.py
+app/ui/archive.py
+app/ui/leak_tab.py
+app/ui/results.py
+app/ui/sidebar.py
+app/ui/styles.py
 README.md
 requirements-lock.txt
 requirements.txt
@@ -86,239 +92,6 @@ requirements.txt
 
 <files>
 This section contains the contents of the repository's files.
-
-<file path="app/agents/leak_agent.py">
-from app.agents.base_agent import BaseAgent
-from app.models.findings import Findings
-from app.models.agent_type import AgentType
-from app.tools.leak_tools import check_hibp
-
-
-class LeakAgent(BaseAgent):
-
-    def run(self, state):
-        target = state.get("current_check")
-
-        result = check_hibp.invoke({
-            "email": target
-        })
-
-        finding = Findings(
-            agent=AgentType.LEAK,
-            input=target,
-            threat_sum=[
-                f"{len(result.get('breaches', []))} Breaches gefunden"
-            ],
-            vulnerability_sum=result.get(
-                "breaches",
-                []
-            )
-        )
-
-        state["findings"].append(finding)
-
-        return state
-</file>
-
-<file path="app/test_mails/demo_test.txt">
-Hallo zusammen,
-
-ich habe den aktuellen Zwischenstand im Projektordner hinterlegt. Die detaillierte Analyse findet ihr lokal unter app\test_mails\osint_argus_review1.pdf.
-
-Falls während des Deployments unerwartete Zertifikatsfehler auftreten, prüft bitte die OCSP-Responder-Einstellungen direkt auf unserer internen Mirror-Domain: srv-update-security.net.
-
-Bei dringenden Rückfragen zur Drei-Tier-Architektur oder den Easy-RSA SubCAs bin ich heute ab 14:00 Uhr mobil erreichbar unter +49 151 9876 5432.
-
-Viele Grüße
-</file>
-
-<file path="app/tools/leak_tools.py">
-import os
-import httpx
-from langchain_core.tools import tool
-
-@tool
-def check_hibp(email: str):
-    """
-    Prüft eine E-Mail-Adresse gegen HaveIBeenPwned.
-    """
-
-    api_key = os.getenv("HIBP_API_KEY")
-
-    url = (
-        f"https://haveibeenpwned.com/api/v3/"
-        f"breachedaccount/{email}"
-    )
-
-    headers = {
-        "hibp-api-key": api_key,
-        "user-agent": "osint-argus"
-    }
-
-    try:
-        response = httpx.get(
-            url,
-            headers=headers,
-            timeout=15
-        )
-
-        if response.status_code == 404:
-            return {
-                "breaches": []
-            }
-
-        response.raise_for_status()
-
-        breaches = response.json()
-
-        return {
-            "breaches": [
-                f"{b['Name']} ({b['BreachDate']})"
-                for b in breaches
-            ]
-        }
-
-    except Exception as e:
-        return {
-            "error": str(e),
-            "breaches": []
-        }
-</file>
-
-<file path="requirements-lock.txt">
-aiohappyeyeballs==2.6.2
-aiohttp==3.14.1
-aiosignal==1.4.0
-altair==6.2.1
-annotated-doc==0.0.4
-annotated-types==0.7.0
-anyio==4.14.0
-attrs==26.1.0
-bcrypt==5.0.0
-blinker==1.9.0
-build==1.5.0
-cachetools==7.1.4
-certifi==2026.6.17
-charset-normalizer==3.4.7
-chromadb==1.5.9
-click==8.4.1
-colorama==0.4.6
-distro==1.9.0
-dnspython==2.8.0
-durationpy==0.10
-filelock==3.29.4
-flatbuffers==25.12.19
-frozenlist==1.8.0
-fsspec==2026.6.0
-gitdb==4.0.12
-GitPython==3.1.50
-googleapis-common-protos==1.75.0
-greenlet==3.5.1
-grpcio==1.81.1
-h11==0.16.0
-hf-xet==1.5.1
-httpcore==1.0.9
-httptools==0.8.0
-httpx==0.28.1
-httpx-sse==0.4.3
-huggingface_hub==1.19.0
-idna==3.18
-importlib_resources==7.1.0
-itsdangerous==2.2.0
-Jinja2==3.1.6
-jiter==0.15.0
-jsonpatch==1.33
-jsonpointer==3.1.1
-jsonschema==4.26.0
-jsonschema-specifications==2025.9.1
-kubernetes==36.0.2
-langchain==1.3.9
-langchain-classic==1.0.8
-langchain-community==0.4.2
-langchain-core==1.4.7
-langchain-openai==1.3.2
-langchain-protocol==0.0.17
-langchain-text-splitters==1.1.2
-langgraph==1.2.5
-langgraph-checkpoint==4.1.1
-langgraph-prebuilt==1.1.0
-langgraph-sdk==0.4.2
-langsmith==0.8.16
-markdown-it-py==4.2.0
-MarkupSafe==3.0.3
-mdurl==0.1.2
-mmh3==5.2.1
-multidict==6.7.1
-narwhals==2.22.1
-numpy==2.4.6
-oauthlib==3.3.1
-onnxruntime==1.27.0
-openai==2.42.0
-opentelemetry-api==1.42.1
-opentelemetry-exporter-otlp-proto-common==1.42.1
-opentelemetry-exporter-otlp-proto-grpc==1.42.1
-opentelemetry-proto==1.42.1
-opentelemetry-sdk==1.42.1
-opentelemetry-semantic-conventions==0.63b1
-orjson==3.11.9
-ormsgpack==1.12.2
-overrides==7.7.0
-packaging==26.2
-pandas==3.0.3
-phonenumbers==9.0.32
-pillow==12.2.0
-propcache==0.5.2
-protobuf==6.33.6
-pyarrow==24.0.0
-pybase64==1.4.3
-pydantic==2.13.4
-pydantic-settings==2.14.1
-pydantic_core==2.46.4
-pydeck==0.9.2
-PyExifTool==0.5.6
-Pygments==2.20.0
-pypdf==6.13.2
-PyPika==0.51.1
-pyproject_hooks==1.2.0
-python-dateutil==2.9.0.post0
-python-dotenv==1.2.2
-python-multipart==0.0.32
-python-whois==0.9.6
-PyYAML==6.0.3
-referencing==0.37.0
-regex==2026.5.9
-requests==2.34.2
-requests-oauthlib==2.0.0
-requests-toolbelt==1.0.0
-rich==15.0.0
-rpds-py==2026.5.1
-shellingham==1.5.4
-six==1.17.0
-smmap==5.0.3
-sniffio==1.3.1
-SQLAlchemy==2.0.51
-starlette==1.3.1
-streamlit==1.58.0
-tenacity==9.1.4
-tiktoken==0.13.0
-tokenizers==0.23.1
-toml==0.10.2
-tqdm==4.68.3
-typer==0.25.1
-typing-inspection==0.4.2
-typing_extensions==4.15.0
-tzdata==2026.2
-urllib3==2.7.0
-uuid_utils==0.16.1
-uvicorn==0.49.0
-watchdog==6.0.0
-watchfiles==1.2.0
-websocket-client==1.9.0
-websockets==15.0.1
-xxhash==3.7.0
-yarl==1.24.2
-zstandard==0.25.0
-</file>
 
 <file path=".gitignore">
 # Python
@@ -539,6 +312,75 @@ Ermittelte OSINT-Rohdaten:
         return state
 </file>
 
+<file path="app/agents/leak_agent.py">
+from app.agents.base_agent import BaseAgent
+from app.models.findings import Findings
+from app.models.agent_type import AgentType
+from app.tools.leak_tools import check_hibp
+from app.memory.chroma_memory import get_user_profile
+
+
+class LeakAgent(BaseAgent):
+
+    def run(self, state):
+        target = state.get("current_check")
+        findings_list = state.get("findings", [])
+        
+        # 1. Lade das erlernte Nutzerprofil aus Schritt 2
+        user_profile = get_user_profile()
+        profile_email = user_profile.get("email", "Unbekannt")
+
+        # 2. Dynamische Target-Ermittlung
+        # Fall A: Das aktuelle Target selbst ist eine E-Mail
+        if target and "@" in target:
+            leak_target = target
+            source_info = f"Direktes Target '{target}'"
+        
+        # Fall B: Das aktuelle Target ist keine E-Mail, aber wir haben eine im Profil gelernt
+        elif profile_email and profile_email != "Unbekannt" and "@" in profile_email:
+            leak_target = profile_email
+            source_info = f"Aus Nutzerprofil korrelierte E-Mail-Adresse '{profile_email}' (während Scan von: {target})"
+        
+        # Fall C: Keine E-Mail-Adresse verfügbar
+        else:
+            print(f"ℹ️ [LeakAgent] Überspringe Leak-Check. Weder Target noch Profil enthalten eine E-Mail-Adresse.")
+            return state
+
+        print(f"🔍 [LeakAgent] Prüfe Datenlecks für: {leak_target} ({source_info})...")
+
+        # 3. Tool aufrufen
+        result = check_hibp.invoke({
+            "email": leak_target
+        })
+
+        # 4. Befunde strukturieren
+        breaches = result.get("breaches", [])
+        error = result.get("error")
+
+        if error:
+            threat_sum = [f"Fehler bei HIBP-Abfrage für {leak_target}"]
+            vulnerability_sum = [f"API-Fehler: {error}"]
+        else:
+            threat_sum = [
+                f"{len(breaches)} Breaches gefunden für {leak_target} ({source_info})"
+            ]
+            vulnerability_sum = breaches if breaches else ["Keine bekannten Datenlecks in HIBP hinterlegt."]
+
+        # 5. In die globalen Findings eintragen
+        finding = Findings(
+            agent=AgentType.LEAK,
+            input=leak_target,
+            threat_sum=threat_sum,
+            vulnerability_sum=vulnerability_sum
+        )
+
+        findings_list.append(finding)
+        state["findings"] = findings_list
+
+        print(f"✅ [LeakAgent] Analyse für {leak_target} abgeschlossen. Funde: {len(breaches)}")
+        return state
+</file>
+
 <file path="app/agents/phone_agent.py">
 import json
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
@@ -641,55 +483,6 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
 MODEL_NAME = os.getenv("MODEL_NAME")
 </file>
 
-<file path="app/memory/chroma_memory.py">
-# Ergänzung / Refactoring von app/memory/chroma_memory.py
-import chromadb
-import uuid
-import datetime
-
-client = chromadb.PersistentClient(path="./chroma_db")
-collection = client.get_or_create_collection("argus_memory")
-
-def save_analysis(query: str, content: str):
-    """
-    Speichert den Input (query) und die Ergebnisse/Zusammenfassung (content).
-    """
-    # Um Duplikate bei gleichem Input zu vermeiden oder historische Versionen zu erlauben,
-    # nutzen wir eine UUID als primäre ID und packen die Query in die Metadaten.
-    analysis_id = str(uuid.uuid4())
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    collection.add(
-        documents=[content],
-        ids=[analysis_id],
-        metadatas=[{
-            "query": query,
-            "timestamp": timestamp
-        }],
-    )
-
-def get_last_analyses(limit=10):
-    """
-    Holt die letzten Analysen sortiert nach Auftreten.
-    """
-    data = collection.get()
-    if not data or not data["ids"]:
-        return []
-
-    docs = []
-    # Zusammenführen für einfachere UI-Iteration
-    for idx in range(len(data["ids"])):
-        docs.append({
-            "id": data["ids"][idx],
-            "query": data["metadatas"][idx].get("query", "Unbekannte Suche"),
-            "timestamp": data["metadatas"][idx].get("timestamp", ""),
-            "content": data["documents"][idx]
-        })
-    
-    # Optional nach Zeitstempel sortieren oder einfach die neuesten zurückgeben
-    return docs[-limit:]
-</file>
-
 <file path="app/models/file_analysis.py">
 from pydantic import BaseModel, Field
 from typing import List, Literal
@@ -739,19 +532,39 @@ To: max.mustermann@gmail.com
 Subject: [DRINGEND] Ungewöhnliche Kontoaktivität festgestellt — Sofortiger Handlungsbedarf
 Reply-To: no-reply@db-security-alert.ru
 Date: Mon, 25 May 2026 03:47:22 +0000
+
 Sehr geehrter Deutsche Bank Kunde,
+
 wir haben verdächtige Aktivitäten in Ihrem Online-Banking-Konto 
 festgestellt. Ihr Konto wurde vorübergehend eingeschränkt.
+
 Um Ihr Konto zu entsperren, müssen Sie Ihre Identität bestätigen:
+
 SCHRITT 1 — Identität verifizieren:
 https://deutsche-bank-verify.com/auth/verify?session=a8f3kX92mP
+
 SCHRITT 2 — TAN eingeben unter:
 https://db-secure-login.net/tan-verify
+
 Bei Problemen mit dem Link:
 https://www.deutsche-bank.de/hilfe
+
 Bitte antworten Sie NICHT auf diese E-Mail.
 Ihr Sicherheitsteam der Deutschen Bank
+
 [Diese E-Mail wurde automatisch generiert]
+</file>
+
+<file path="app/test_mails/demo_test.txt">
+Hallo zusammen,
+
+ich habe den aktuellen Zwischenstand im Projektordner hinterlegt. Die detaillierte Analyse findet ihr lokal unter app\test_mails\osint_argus_review1.pdf.
+
+Falls während des Deployments unerwartete Zertifikatsfehler auftreten, prüft bitte die OCSP-Responder-Einstellungen direkt auf unserer internen Mirror-Domain: srv-update-security.net.
+
+Bei dringenden Rückfragen zur Drei-Tier-Architektur oder den Easy-RSA SubCAs bin ich heute ab 14:00 Uhr mobil erreichbar unter +49 151 9876 5432.
+
+Viele Grüße
 </file>
 
 <file path="app/test_mails/email_test.txt">
@@ -1168,6 +981,60 @@ def search_username_with_sherlock(username: str) -> dict:
     }
 </file>
 
+<file path="app/tools/leak_tools.py">
+import requests
+from langchain_core.tools import tool
+
+@tool
+def check_hibp(email: str) -> dict:
+    """
+    Sucht via XposedOrNot API nach realen Datenlecks einer E-Mail-Adresse.
+    Vollständig kostenlos, Open-Source und ohne API-Key nutzbar.
+    """
+    email_clean = email.strip().lower()
+    
+    # Offizielle, freie API-Schnittstelle von XposedOrNot
+    url = f"https://api.xposedornot.com/v1/check-email/{email_clean}"
+    
+    # Ein korrekter User-Agent ist Best Practice bei OSINT-Abfragen
+    headers = {
+        "User-Agent": "OSINT-Argus-Cybersecurity-Analyzer-Student-Project"
+    }
+    
+    try:
+        # Die API erlaubt bis zu 2 Anfragen pro Sekunde (perfekt für uns)
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # XposedOrNot liefert ein Array aus Listen zurück, z.B. [["Adobe"], ["LinkedIn"]]
+            raw_breaches = data.get("breaches", [])
+            
+            # Flachklopfen der verschachtelten Liste zu sauberen Strings für die UI
+            breaches = []
+            for item in raw_breaches:
+                if isinstance(item, list) and len(item) > 0:
+                    breaches.append(f"Breach: {item[0]}")
+                elif isinstance(item, str):
+                    breaches.append(f"Breach: {item}")
+                    
+            return {"breaches": breaches}
+            
+        elif response.status_code == 404:
+            # 404 bedeutet bei dieser API: Die E-Mail ist in keinem bekannten Leak!
+            return {"breaches": []}
+            
+        elif response.status_code == 429:
+            return {"error": "API-Rate-Limit überschritten (Max 2 Requests/Sekunde). Bitte kurz warten."}
+        else:
+            return {"error": f"Alternative API lieferte Status Code {response.status_code}"}
+            
+    except requests.exceptions.Timeout:
+        return {"error": "Zeitüberschreitung bei der Anfrage an die Leak-Datenbank."}
+    except Exception as e:
+        return {"error": f"Verbindungsfehler zur OSINT-Schnittstelle: {str(e)}"}
+</file>
+
 <file path="app/tools/phone_tools.py">
 import os
 import httpx
@@ -1239,6 +1106,1187 @@ PHONE_TOOLS = [
     check_phone_reputation,
 
 ]
+</file>
+
+<file path="app/ui_main.py">
+import streamlit as st
+import time
+from app.ui.analyse_tab import run_with_live_log
+from app.ui.archive import check_archiv
+from app.ui.leak_tab import render_leak_tab
+from app.ui.results import render_results
+from app.ui.sidebar import render_sidebar
+
+st.set_page_config(
+    page_title="OSINT-Argus",
+    page_icon="👁️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+# ── Main ──────────────────────────────────────────────────────────────────────
+def main():
+    render_sidebar()
+
+    if check_archiv(): return
+
+    st.markdown(
+        '<div class="argus-header">'
+        '<span style="font-size:2.2rem">👁️</span>'
+        '<div><p class="argus-title">OSINT-Argus</p>'
+        '<p class="argus-sub">Multi-Agent Cybersecurity Analyzer</p></div>'
+        '</div>', unsafe_allow_html=True,
+    )
+
+    # ==============================================================================
+    # SCHRITT 3: TABS FÜR DIE SEKTIONEN (Standardmäßig ist Tab 1 aktiv)
+    # ==============================================================================
+    tab1, tab2 = st.tabs(["🔍 Analyse-Pipeline", "👤 Profil & Leak-Check"])
+
+    # --- TAB 1: ANALYSE-PIPELINE (STANDARD) ---
+    with tab1:
+        col_input, col_help = st.columns([3, 1])
+        with col_input:
+            user_input = st.text_area(
+                "Input",
+                placeholder=(
+                    "Domain          →  example.com\n"
+                    "E-Mail-Adresse  →  user@domain.com\n"
+                    "E-Mail-Inhalt   →  komplette Mail hier reinkopieren\n"
+                    "Telefonnummer   →  +49 151 12345678\n"
+                    "Dateipfad/Hash  →  /pfad/zur/datei.pdf"
+                ),
+                height=190,
+                label_visibility="collapsed",
+            )
+        with col_help:
+            st.markdown("**Unterstützte Inputs**")
+            for line in ["🌐 Domain / URL", "📧 E-Mail-Adresse", "📨 E-Mail-Inhalt",
+                         "📞 Telefonnummer", "📄 Datei / Hash", "🔎 Software + Version"]:
+                st.caption(line)
+
+        run_col, clear_col, _ = st.columns([1, 1, 4])
+        with run_col:
+            run_btn = st.button("🔍 Analysieren", type="primary", use_container_width=True)
+        with clear_col:
+            if st.button("✕ Leeren", use_container_width=True):
+                st.session_state.pop("last_result", None)
+                st.rerun()
+
+        if run_btn:
+            if not user_input or not user_input.strip():
+                st.warning("Bitte einen Input eingeben.")
+            else:
+                t0 = time.time()
+                try:
+                    result  = run_with_live_log(user_input.strip())
+                    elapsed = round(time.time() - t0, 1)
+                    st.success(f"✅ Analyse abgeschlossen in {elapsed}s")
+                except Exception as e:
+                    st.error(f"❌ Pipeline-Fehler: {type(e).__name__}: {e}")
+                    st.stop()
+
+                if "history" not in st.session_state:
+                    st.session_state["history"] = []
+                st.session_state["history"].append({
+                    "query":      user_input.strip()[:60],
+                    "risk_level": result.get("risk_level", "UNKNOWN"),
+                    "score":      result.get("risk_score", 0),
+                })
+                st.session_state["last_result"] = result
+
+        if "last_result" in st.session_state:
+            render_results(st.session_state["last_result"])
+
+    # --- TAB 2: PROFIL & LEAK SCAN ---
+    with tab2:
+        render_leak_tab()
+
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="app/ui/analyse_tab.py">
+"""
+app/ui/analyse_tab.py
+Tab 1: Analyse-Pipeline mit Live-Agent-Log und Ergebnisdarstellung.
+"""
+
+import time
+import streamlit as st
+
+from app.graph import graph
+from app.ui.styles import AGENT_ICON
+from app.ui.results import render_results
+
+
+# ── State-Builder ─────────────────────────────────────────────────────────────
+
+def build_initial_state(user_input: str) -> dict:
+    return {
+        "user_input":     user_input,
+        "input_type":     "unknown",
+        "current_agent":  "input",
+        "next_agent":     "",
+        "findings":       [],
+        "risk_score":     None,
+        "summary":        None,
+        "memory_context": None,
+        "to_scan":        [],
+        "scanned":        [],
+        "current_check":  None,
+        "file_paths":     [],
+        "file_hashes":    [],
+    }
+
+
+# ── Live-Pipeline ─────────────────────────────────────────────────────────────
+
+def run_with_live_log(user_input: str) -> dict:
+    """Streamt die Graph-Pipeline und zeigt den Agent-Fortschritt live an."""
+    state    = build_initial_state(user_input)
+    log_slot = st.empty()
+    log_rows: list[tuple] = []   # (agent, target, done)
+    t0 = time.time()
+
+    def render_log() -> None:
+        from app.ui.styles import CSS # 💡 Wir holen deine globale CSS-Konstante
+        
+        rows_html = ""
+        for agent, target, done in log_rows[-14:]:
+            icon   = AGENT_ICON.get(agent, "⚙️")
+            status = "✅" if done else "⏳"
+            tgt    = target[:60] if target else ""
+            
+            # Hier greifen jetzt wieder deine Klassen .live-row, .live-agent, etc.
+            rows_html += (
+                f'<div class="live-row">'
+                f'<span style="font-size:1rem;">{icon}</span>'
+                f'<span class="live-agent">{agent.upper()}</span>'
+                f'<span class="live-target">{tgt}</span>'
+                f'<span class="live-status">{status}</span>'
+                f'</div>'
+            )
+            
+        elapsed = round(time.time() - t0, 1)
+        log_slot.markdown(
+            f'{CSS}' # 💡 Wir betten das CSS direkt ein, damit der Browser die Klassen kennt!
+            f'<div style="border:1px solid rgba(128,128,128,0.15);border-radius:10px;'
+            f'padding:1rem 1.2rem;margin:0.5rem 0">'
+            f'<div style="font-size:0.7rem;opacity:0.4;margin-bottom:0.6rem;'
+            f'letter-spacing:0.08em">AGENT PIPELINE · {elapsed}s</div>'
+            f'{rows_html}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    all_findings: list = []
+    final_state = state.copy()
+
+    for chunk in graph.stream(state, stream_mode="updates"):
+        for node_name, node_state in chunk.items():
+            if log_rows:
+                prev = log_rows[-1]
+                log_rows[-1] = (prev[0], prev[1], True)
+
+            target = node_state.get("current_check") or ""
+            log_rows.append((node_name, target, False))
+            render_log()
+
+            for key in ("risk_score", "risk_level", "summary", "action_advice",
+                        "input_type", "memory_context", "next_agent", "current_check"):
+                if node_state.get(key) is not None:
+                    final_state[key] = node_state[key]
+
+            if node_state.get("findings"):
+                all_findings.extend(node_state["findings"])
+
+            for key in ("to_scan", "scanned"):
+                if key in node_state:
+                    final_state[key] = node_state[key]
+
+    if log_rows:
+        prev = log_rows[-1]
+        log_rows[-1] = (prev[0], prev[1], True)
+    render_log()
+
+    final_state["findings"] = all_findings
+    return final_state
+
+
+# ── Tab-Render ────────────────────────────────────────────────────────────────
+
+def render_analyse_tab() -> None:
+    """Rendert den kompletten Analyse-Pipeline Tab."""
+    col_input, col_help = st.columns([3, 1])
+
+    with col_input:
+        user_input = st.text_area(
+            "Input",
+            placeholder=(
+                "Domain          →  example.com\n"
+                "E-Mail-Adresse  →  user@domain.com\n"
+                "E-Mail-Inhalt   →  komplette Mail hier reinkopieren\n"
+                "Telefonnummer   →  +49 151 12345678\n"
+                "Dateipfad/Hash  →  /pfad/zur/datei.pdf"
+            ),
+            height=190,
+            label_visibility="collapsed",
+        )
+    with col_help:
+        st.markdown("**Unterstützte Inputs**")
+        for line in [
+            "🌐 Domain / URL", "📧 E-Mail-Adresse", "📨 E-Mail-Inhalt",
+            "📞 Telefonnummer", "📄 Datei / Hash", "🔎 Software + Version",
+        ]:
+            st.caption(line)
+
+    run_col, clear_col, _ = st.columns([1, 1, 4])
+    with run_col:
+        run_btn = st.button("🔍 Analysieren", type="primary", use_container_width=True)
+    with clear_col:
+        if st.button("✕ Leeren", use_container_width=True):
+            st.session_state.pop("last_result", None)
+            st.rerun()
+
+    if run_btn:
+        if not user_input or not user_input.strip():
+            st.warning("Bitte einen Input eingeben.")
+        else:
+            t0 = time.time()
+            try:
+                result  = run_with_live_log(user_input.strip())
+                elapsed = round(time.time() - t0, 1)
+                st.success(f"✅ Analyse abgeschlossen in {elapsed}s")
+            except Exception as e:
+                st.error(f"❌ Pipeline-Fehler: {type(e).__name__}: {e}")
+                st.stop()
+
+            if "history" not in st.session_state:
+                st.session_state["history"] = []
+            st.session_state["history"].append({
+                "query":      user_input.strip()[:60],
+                "risk_level": result.get("risk_level", "UNKNOWN"),
+                "score":      result.get("risk_score", 0),
+            })
+            st.session_state["last_result"] = result
+
+    if "last_result" in st.session_state:
+        render_results(st.session_state["last_result"])
+</file>
+
+<file path="app/ui/archive.py">
+"""
+app/ui/archive.py
+Prüft, ob ein archivierter ChromaDB-Report geladen ist, und zeigt ihn an.
+Gibt True zurück, wenn ein Archiv-Report angezeigt wurde (main() soll dann abbrechen).
+"""
+
+import json
+import streamlit as st
+
+from app.ui.styles import LEVEL_ICON, LEVEL_COLOR, level_badge, score_bar
+
+
+def check_archiv() -> bool:
+    """
+    Zeigt einen archivierten Report aus dem Session-State an.
+    Gibt True zurück wenn ein Report gerendert wurde, sonst False.
+    """
+    if "active_report_content" not in st.session_state:
+        return False
+
+    st.markdown(
+        '<div class="argus-header">'
+        '<span style="font-size:2.2rem">📜</span>'
+        '<div><p class="argus-title">Archivierter Befund</p>'
+        f'<p class="argus-sub">Eingabe: {st.session_state["active_report_query"][:80]}...</p></div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    st.info("ℹ️ Sie betrachten eine historische Analyse aus der ChromaDB-Vektordatenbank.")
+
+    try:
+        data = json.loads(st.session_state["active_report_content"])
+        _render_archive_body(data)
+    except Exception:
+        st.warning("Das Format dieser alten Analyse ist unstrukturiert. Zeige Rohdaten an:")
+        st.text_area("Report Rohdaten", st.session_state["active_report_content"], height=350)
+
+    st.markdown("---")
+    if st.button("🔄 Neue Analyse starten", type="primary"):
+        del st.session_state["active_report_content"]
+        del st.session_state["active_report_query"]
+        st.rerun()
+
+    return True
+
+
+# ── private Hilfsfunktion ────────────────────────────────────────────────────
+
+def _render_archive_body(data: dict) -> None:
+    lvl            = data.get("risk_level", "UNKNOWN")
+    score          = data.get("score", 0)
+    summary        = data.get("summary", "")
+    indicators     = data.get("indicators", [])
+    prevent_text   = data.get("action_prevent", "")
+    incident_steps = data.get("action_incident_response", [])
+
+    # Scores & Badge
+    col_ts, col_vs, col_lvl = st.columns([1, 1, 1])
+    color_t = LEVEL_COLOR.get(lvl, "#9ca3af")
+
+    with col_ts:
+        st.markdown("**Risiko-Score**")
+        st.markdown(
+            f'<span style="font-size:2.2rem;font-weight:700">{score}</span>'
+            f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
+            f'{score_bar(score, color_t)}',
+            unsafe_allow_html=True,
+        )
+    with col_vs:
+        st.markdown("**Datenquelle**")
+        st.markdown(
+            '<span style="font-size:1.5rem;font-weight:600;display:block;margin-top:8px;">'
+            'ChromaDB Persistent</span>',
+            unsafe_allow_html=True,
+        )
+    with col_lvl:
+        st.markdown("**Gesamteinstufung**")
+        st.markdown(level_badge(lvl), unsafe_allow_html=True)
+
+    # Zusammenfassung
+    if summary:
+        st.markdown("---")
+        st.markdown("#### Zusammenfassung")
+        st.info(summary)
+
+    # Indikatoren
+    if indicators:
+        st.markdown("#### 💡 Haupt-Risikoindikatoren")
+        cols = st.columns(3)
+        for i, ind in enumerate(indicators[:9]):
+            clean = ind.replace("**", "").replace("`", "").strip("- ").strip()
+            if not clean:
+                continue
+            with cols[i % 3]:
+                st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
+
+    # Handlungsempfehlungen
+    st.markdown("---")
+    st.markdown("#### Handlungsempfehlungen")
+    col_p, col_i = st.columns(2)
+
+    with col_p:
+        st.markdown("🚫 **Unbedingt vermeiden**")
+        st.markdown(
+            f'<div class="action-box action-prevent">{prevent_text}</div>',
+            unsafe_allow_html=True,
+        )
+    with col_i:
+        st.markdown("🔥 **Falls bereits geklickt**")
+        if incident_steps:
+            incident_text = "<br>".join(
+                step if step.startswith(("1.", "2.", "3.", "4.")) else f"{idx + 1}. {step}"
+                for idx, step in enumerate(incident_steps)
+            )
+        else:
+            incident_text = "Keine spezifischen Incident-Response-Schritte hinterlegt."
+        st.markdown(
+            f'<div class="action-box action-incident">{incident_text}</div>',
+            unsafe_allow_html=True,
+        )
+</file>
+
+<file path="app/ui/leak_tab.py">
+"""
+app/ui/leak_tab.py
+Tab 2: Digitale Identitäts-Akte — Profil-Verwaltung, OSINT-Scan
+und kombinierte Ergebnisdarstellung.
+"""
+
+import streamlit as st
+
+from app.memory.chroma_memory import get_user_profile, save_user_profile
+from app.agents.leak_agent import LeakAgent
+from app.agents.identity_agent import IdentityAgent
+from app.models.router import ExecutiveSummary
+
+
+def render_leak_tab() -> None:
+    """Rendert den kompletten Profil- & Leak-Check Tab."""
+    st.header("👤 Digitale Identitäts-Akte (Lernendes Profil)")
+    st.write(
+        "Dieses Profil schärft sich automatisch aus deinen eingegebenen Texten (Schritt 2). "
+        "Du kannst die Daten hier jederzeit korrigieren oder ergänzen."
+    )
+
+    current_profile = get_user_profile()
+    vorname, nachname, email, telefon = _render_profile_form(current_profile)
+    _render_osint_scan_button(vorname, nachname, email, current_profile)
+    _render_scan_results(current_profile)
+
+
+# ── Profil-Formular ───────────────────────────────────────────────────────────
+
+def _render_profile_form(current_profile: dict) -> tuple[str, str, str, str]:
+    """Zeigt das editierbare Profil-Formular und gibt die aktuellen Feldwerte zurück."""
+    with st.form("profile_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            vorname = st.text_input("Vorname",                          value=current_profile.get("vorname",   "Unbekannt"))
+            email   = st.text_input("E-Mail-Adresse (für Leak-Checks)", value=current_profile.get("email",    "Unbekannt"))
+        with col2:
+            nachname = st.text_input("Nachname",       value=current_profile.get("nachname", "Unbekannt"))
+            telefon  = st.text_input("Telefonnummer",  value=current_profile.get("telefon",  "Unbekannt"))
+
+        st.markdown(f"**Erkanntes IT-Kompetenzlevel:** `{current_profile.get('kompetenz_level', 'UNBEKANNT')}`")
+        st.markdown(f"**Gefundene Fachbegriffe:** {', '.join(current_profile.get('fachbegriffe', [])) or 'Keine'}")
+        st.caption(f"*Profiler-Charakteristik:* {current_profile.get('charakteristik', '')}")
+
+        if st.form_submit_button("Profil-Änderungen speichern"):
+            updated = {
+                "vorname":          vorname,
+                "nachname":         nachname,
+                "email":            email,
+                "telefon":          telefon,
+                "kompetenz_level":  current_profile.get("kompetenz_level", "UNBEKANNT"),
+                "fachbegriffe":     current_profile.get("fachbegriffe", []),
+                "charakteristik":   "Manuell vom Nutzer angepasst.",
+            }
+            save_user_profile(updated)
+            st.success("Profil erfolgreich in ChromaDB aktualisiert!")
+            st.rerun()
+
+    return vorname, nachname, email, telefon
+
+
+# ── OSINT-Scan-Button ─────────────────────────────────────────────────────────
+
+def _render_osint_scan_button(
+    vorname: str, nachname: str, email: str, current_profile: dict
+) -> None:
+    st.subheader("🛡️ On-Demand OSINT Target-Scanning")
+    st.write(
+        "Triggere den `LeakAgent` (E-Mail) und den `IdentityAgent` (Klarname) parallel, "
+        "um Exposures und Profile aufzudecken."
+    )
+
+    if not st.button("🔥 Person im Internet aufspüren & prüfen", type="primary"):
+        return
+
+    has_valid_email = bool(email and email != "Unbekannt" and "@" in email)
+    fullname_target = f"{vorname.strip()} {nachname.strip()}".replace("Unbekannt", "").strip()
+
+    if not has_valid_email and not fullname_target:
+        st.error("❌ Bitte trage zuerst einen Namen oder eine E-Mail-Adresse im Profil ein.")
+        return
+
+    st.session_state["osint_scan_results"] = {}
+
+    if has_valid_email:
+        with st.spinner(f"🕵️ LeakAgent sucht nach Datenlecks für '{email}'..."):
+            try:
+                res = LeakAgent().run({"current_check": email, "findings": []})
+                if res.get("findings"):
+                    st.session_state["osint_scan_results"]["leak"] = res["findings"][-1]
+            except Exception as e:
+                st.error(f"Fehler im LeakAgent: {e}")
+
+    if fullname_target:
+        with st.spinner(f"🔎 IdentityAgent scannt soziale Profile für '{fullname_target}'..."):
+            try:
+                res = IdentityAgent().run({"current_check": fullname_target, "findings": []})
+                if res.get("findings"):
+                    st.session_state["osint_scan_results"]["identity"] = res["findings"][-1]
+            except Exception as e:
+                st.error(f"Fehler im IdentityAgent: {e}")
+
+
+# ── Ergebnis-Rendering ────────────────────────────────────────────────────────
+
+def _render_scan_results(current_profile: dict) -> None:
+    scan_data = st.session_state.get("osint_scan_results")
+    if not scan_data:
+        return
+
+    st.markdown("---")
+    st.markdown("## 📊 Kombinierte OSINT-Ermittlungsakte")
+
+    _maybe_generate_summary(scan_data, current_profile)
+    _render_executive_summary(scan_data)
+
+    col_left, col_right = st.columns([1, 1])
+    with col_left:
+        _render_identity_column(scan_data)
+    with col_right:
+        _render_leak_column(scan_data)
+
+
+def _maybe_generate_summary(scan_data: dict, current_profile: dict) -> None:
+    """Generiert die Executive-Summary via LLM, sofern noch nicht vorhanden."""
+    if "summary" in scan_data:
+        return
+
+    with st.spinner("🧠 OutputAgent generiert die Gesamtlage und Handlungsempfehlungen..."):
+        try:
+            from app.models.llm import get_llm
+
+            summary_llm = get_llm().with_structured_output(ExecutiveSummary)
+
+            ident_raw  = scan_data["identity"].vulnerability_sum if "identity" in scan_data else []
+            threat_raw = scan_data["identity"].threat_sum        if "identity" in scan_data else []
+            leak_raw   = scan_data["leak"].vulnerability_sum     if "leak"     in scan_data else []
+
+            prompt = f"""
+Du bist ein empathischer, aber glasklarer Cybersecurity-Berater. Analysiere die folgenden
+OSINT-Ergebnisse und erstelle eine prägnante Lagebeurteilung DIREKT an den Nutzer gerichtet.
+
+Nutze konsequent die Du-Form ("Du", "Dein Profile", "Deine Daten"). Vermeide es, in der
+dritten Person zu sprechen.
+
+Gefundene Profile/Datenkonstrukte: {ident_raw}
+Erkannte Bedrohungen der Identität: {threat_raw}
+Gefundene Datenlecks (Breaches): {leak_raw}
+IT-Kompetenzlevel des Nutzers: {current_profile.get('kompetenz_level', 'FORTGESCHRITTEN')}
+
+Generiere die Antwort strikt für das Pydantic-Modell 'ExecutiveSummary':
+1. headline: Eine direkte, wachrüttelnde Punchline.
+2. digital_footprint_summary: Kurze Zusammenfassung, was man über DICH im Netz herausfinden kann.
+3. primary_threat_vector: Welcher konkrete Angriffs-Szenario droht DIR aktuell am meisten?
+4. action_items: Eine Liste von exakt 3 konkreten, sofort umsetzbaren To-Dos.
+"""
+            st.session_state["osint_scan_results"]["summary"] = summary_llm.invoke(prompt)
+        except Exception as e:
+            st.caption(f"Gesamtzusammenfassung temporär nicht verfügbar: {e}")
+
+
+def _render_executive_summary(scan_data: dict) -> None:
+    summary = scan_data.get("summary")
+    if not summary:
+        return
+
+    st.markdown(
+        f"""
+        <div style="background-color:#f4f6f9;border-left:5px solid #1f77b4;
+                    padding:15px;border-radius:6px;margin-bottom:20px;">
+            <h4 style="margin:0 0 5px 0;color:#1f77b4;">🔮 OutputAgent: Lagebeurteilung</h4>
+            <p style="font-size:1.1rem;font-weight:bold;margin:0;">"{summary.headline}"</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**🌐 Digitale Präsenz:**")
+        st.write(summary.digital_footprint_summary)
+    with c2:
+        st.markdown("**🎯 Primärer Angriffsvektor:**")
+        st.write(summary.primary_threat_vector)
+
+    st.markdown("##### 🛠️ Sofortige Abwehrmaßnahmen (Action Items):")
+    for item in summary.action_items:
+        st.markdown(f"- [ ] {item}")
+    st.markdown("---")
+
+
+def _render_identity_column(scan_data: dict) -> None:
+    st.markdown("### 👤 IdentityAgent Profil-Funde")
+
+    if "identity" not in scan_data:
+        st.caption("Keine Identitätsdaten geladen.")
+        return
+
+    ident_finding = scan_data["identity"]
+    vector_text   = "".join(ident_finding.threat_sum).lower()
+    risk_color    = "red" if ("high" in vector_text or "critical" in vector_text) else "orange"
+
+    st.markdown(
+        f"**Spear-Phishing Vektor-Risiko:** "
+        f"<span style='color:{risk_color};font-weight:bold;font-size:1.1rem;'>⚠️ HIGH</span>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("#### 🌐 Verifizierte Profile & Vektoren")
+
+    raw_entries     = ident_finding.vulnerability_sum
+    current_platform = None
+    platform_data: dict[str, dict] = {}
+
+    for entry in raw_entries:
+        entry_str = str(entry).strip()
+
+        if (
+            ("github" in entry_str.lower() or "reddit" in entry_str.lower() or "instagram" in entry_str.lower())
+            and "https://" in entry_str.lower()
+        ):
+            current_platform = (
+                "GitHub"    if "github"    in entry_str.lower() else
+                "Reddit"    if "reddit"    in entry_str.lower() else
+                "Instagram"
+            )
+            url = entry_str.split("(")[1].split(")")[0] if "(" in entry_str else entry_str
+            platform_data[current_platform] = {"url": url, "angriffsvektor": "", "pretexts": []}
+
+        elif current_platform and "angriffsvektor:" in entry_str.lower():
+            platform_data[current_platform]["angriffsvektor"] = (
+                entry_str.split("Angriffsvektor:")[1].strip()
+            )
+
+        elif current_platform and (entry_str.startswith("•") or entry_str.startswith("- •")):
+            clean_pretext = entry_str.replace("•", "").replace('"', "").strip()
+            platform_data[current_platform]["pretexts"].append(clean_pretext)
+
+    if platform_data:
+        for plat_name, data in platform_data.items():
+            st.markdown(f"**🔗 Plattform:** [{plat_name}]({data['url']})")
+            if data["angriffsvektor"]:
+                st.caption(f"**Gefahrenanalyse:** {data['angriffsvektor']}")
+            if data["pretexts"]:
+                with st.expander(f"🎯 Mögliche Phishing-Betreffzeilen ({plat_name})"):
+                    for pt in data["pretexts"]:
+                        st.code(pt, language="text")
+            st.markdown("<div style='margin-bottom:15px;'></div>", unsafe_allow_html=True)
+    else:
+        st.info("Profile gefunden. Details im Expander:")
+        with st.expander("Rohdaten anzeigen"):
+            st.write(raw_entries)
+
+
+def _render_leak_column(scan_data: dict) -> None:
+    st.markdown("### 🛡️ LeakAgent Exposure-Funde")
+
+    if "leak" not in scan_data:
+        st.caption("Keine Leak-Daten geladen.")
+        return
+
+    leak_finding = scan_data["leak"]
+    breaches     = leak_finding.vulnerability_sum
+
+    if not breaches:
+        st.success("🎉 **Entwarnung:** Keine bekannten Datenlecks für diese E-Mail registriert.")
+        return
+
+    st.error(f"🚨 **Gefahr:** Diese Identität ist in **{len(breaches)} Datenlecks** vertreten!")
+
+    for vuln in breaches:
+        display_name = str(vuln).replace("Breach: ", "")
+        st.markdown(
+            f"""
+            <div style="background-color:#ffeded;border-left:5px solid #ff4b4b;
+                        padding:10px;border-radius:4px;margin-bottom:8px;">
+                <strong style="color:#ff4b4b;">🔥 {display_name}</strong><br/>
+                <small style="color:#555;">Kategorie: Credential Leak Exposure</small>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if "zynga" in display_name.lower():
+            with st.expander("ℹ️ Details zu Zynga"):
+                st.write("**Geleakt:** Passwörter (SHA-1), E-Mails, Usernames.")
+                st.write(
+                    "**Risiko:** Angreifer testen diese Kombinationen automatisiert "
+                    "bei anderen Portalen."
+                )
+</file>
+
+<file path="app/ui/results.py">
+"""
+app/ui/results.py
+Extrahiert und rendert die Ergebnisse der Analyse-Pipeline.
+"""
+
+import streamlit as st
+
+from app.ui.styles import LEVEL_COLOR, LEVEL_ICON, AGENT_ICON, level_badge, score_bar
+
+
+# ── Daten-Extraktion ─────────────────────────────────────────────────────────
+
+def extract_output_report(findings: list) -> dict:
+    """
+    Liest Threat- und Vulnerability-Scores sowie Indikatoren aus den
+    OutputAgent-Findings heraus (stream_mode='updates' überträgt risk_level
+    und risk_score nicht direkt im State).
+    """
+    threat_score = vuln_score = risk_level = None
+    indicators: list[str] = []
+
+    for f in findings:
+        agent_val  = str(getattr(getattr(f, "agent", ""), "value", ""))
+        threat_sum = getattr(f, "threat_sum", [])
+        vuln_sum   = getattr(f, "vulnerability_sum", [])
+
+        if agent_val != "orchestrator":
+            continue
+        if not any("Threat Score" in str(t) for t in threat_sum):
+            continue
+
+        for t in threat_sum:
+            s = str(t)
+            if "Threat Score" in s:
+                try:
+                    threat_score = int(s.split(":")[-1].strip())
+                except ValueError:
+                    pass
+            if "Level" in s:
+                try:
+                    risk_level = s.split(":")[-1].strip()
+                except ValueError:
+                    pass
+
+        for v in vuln_sum:
+            s = str(v)
+            if "Vulnerability Score" in s:
+                try:
+                    vuln_score = int(s.split(":")[-1].strip())
+                except ValueError:
+                    pass
+            else:
+                indicators.append(s)
+
+    return {
+        "threat_score": threat_score,
+        "vuln_score":   vuln_score,
+        "risk_level":   risk_level,
+        "indicators":   indicators,
+    }
+
+
+# ── Haupt-Render-Funktion ────────────────────────────────────────────────────
+
+def render_results(result: dict) -> None:
+    findings = result.get("findings") or []
+    report   = extract_output_report(findings)
+
+    threat_score = report["threat_score"] or 0
+    vuln_score   = report["vuln_score"]   or 0
+    risk_level   = report["risk_level"]   or result.get("risk_level") or "UNKNOWN"
+    indicators   = report["indicators"]
+
+    summary    = result.get("summary")      or ""
+    action_adv = result.get("action_advice") or ""
+
+    st.markdown("---")
+    _render_scores(threat_score, vuln_score, risk_level)
+
+    if summary:
+        st.markdown("---")
+        st.markdown("#### Zusammenfassung")
+        st.info(summary)
+
+    if indicators:
+        _render_indicators(indicators)
+
+    if action_adv:
+        _render_action_advice(action_adv)
+
+    _render_agent_findings(findings)
+
+
+# ── private Hilfsfunktionen ──────────────────────────────────────────────────
+
+def _render_scores(threat_score: int, vuln_score: int, risk_level: str) -> None:
+    col_ts, col_vs, col_lvl = st.columns([1, 1, 1])
+    color_t = LEVEL_COLOR.get(risk_level, "#9ca3af")
+
+    with col_ts:
+        st.markdown("**Bedrohungs-Score**")
+        st.markdown(
+            f'<span style="font-size:2.2rem;font-weight:700">{threat_score}</span>'
+            f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
+            f'{score_bar(threat_score, color_t)}',
+            unsafe_allow_html=True,
+        )
+    with col_vs:
+        st.markdown("**Schwachstellen-Score**")
+        st.markdown(
+            f'<span style="font-size:2.2rem;font-weight:700">{vuln_score}</span>'
+            f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
+            f'{score_bar(vuln_score, "#f59e0b")}',
+            unsafe_allow_html=True,
+        )
+    with col_lvl:
+        st.markdown("**Gesamteinstufung**")
+        st.markdown(level_badge(risk_level), unsafe_allow_html=True)
+        if risk_level == "CRITICAL":
+            st.error("Sofortiger Handlungsbedarf!")
+        elif risk_level == "HIGH":
+            st.warning("Erhöhtes Risiko — Vorsicht geboten.")
+        elif risk_level == "MEDIUM":
+            st.info("Moderates Risiko — aufmerksam bleiben.")
+        else:
+            st.success("Kein akutes Risiko erkannt.")
+
+
+def _render_indicators(indicators: list[str]) -> None:
+    st.markdown("#### 💡 Haupt-Risikoindikatoren")
+    cols = st.columns(3)
+    for i, ind in enumerate(indicators[:9]):
+        clean = ind.replace("**", "").replace("`", "").strip("- ").strip()
+        if not clean:
+            continue
+        with cols[i % 3]:
+            st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
+
+
+def _render_action_advice(action_adv: str) -> None:
+    st.markdown("---")
+    st.markdown("#### Handlungsempfehlungen")
+
+    split_marker = "FALLS BEREITS GEKLICKT:"
+    if split_marker in action_adv:
+        parts         = action_adv.split(split_marker, 1)
+        prevent_text  = parts[0].replace("PRÄVENTION:", "").strip()
+        incident_text = parts[1].strip()
+    else:
+        prevent_text  = action_adv.strip()
+        incident_text = ""
+
+    col_p, col_i = st.columns(2)
+    with col_p:
+        st.markdown("🚫 **Unbedingt vermeiden**")
+        st.markdown(
+            f'<div class="action-box action-prevent">{prevent_text}</div>',
+            unsafe_allow_html=True,
+        )
+    with col_i:
+        st.markdown("🔥 **Falls bereits geklickt**")
+        if incident_text:
+            body = incident_text
+        else:
+            body = (
+                "1. Gerät sofort vom Netzwerk trennen.<br>"
+                "2. Passwörter von einem sicheren Gerät ändern.<br>"
+                "3. Bank / IT-Sicherheit kontaktieren.<br>"
+                "4. Gerät auf Malware scannen."
+            )
+        st.markdown(
+            f'<div class="action-box action-incident">{body}</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def _render_agent_findings(findings: list) -> None:
+    st.markdown("---")
+    st.markdown("#### Agent-Findings (Detail)")
+
+    display_findings = []
+    seen: set[tuple] = set()
+    for f in findings:
+        agent_val = str(getattr(getattr(f, "agent", ""), "value", ""))
+        inp       = getattr(f, "input", "")
+        key       = (agent_val, inp)
+        if agent_val == "orchestrator" or key in seen:
+            continue
+        seen.add(key)
+        display_findings.append(f)
+
+    if not display_findings:
+        st.caption("Keine Detail-Findings vorhanden.")
+        return
+
+    for f in display_findings:
+        agent_val = str(getattr(getattr(f, "agent", ""), "value", "?"))
+        inp       = getattr(f, "input", "")
+        threats   = getattr(f, "threat_sum", [])
+        vulns     = getattr(f, "vulnerability_sum", [])
+        icon      = AGENT_ICON.get(agent_val, "⚙️")
+
+        with st.expander(f"{icon} {agent_val.upper()} — {inp[:60]}", expanded=False):
+            if threats:
+                st.markdown("**🎯 Bedrohungen**")
+                for t in threats:
+                    if str(t).strip():
+                        st.markdown(f"- {t}")
+            if vulns:
+                st.markdown("**🔍 Schwachstellen / Befunde**")
+                for v in vulns:
+                    if str(v).strip():
+                        st.markdown(f"- {v}")
+            if not threats and not vulns:
+                st.caption("Keine Befunde.")
+</file>
+
+<file path="app/ui/sidebar.py">
+"""
+app/ui/sidebar.py
+Rendert die linke Seitenleiste mit Analyse-Historie aus ChromaDB.
+"""
+
+import json
+import streamlit as st
+
+from app.memory.chroma_memory import get_last_analyses
+from app.ui.styles import LEVEL_ICON
+
+
+def render_sidebar() -> None:
+    """Seitenleiste mit den letzten 8 Analysen aus der ChromaDB."""
+    with st.sidebar:
+        st.markdown("## 👁️ OSINT-Argus")
+        st.caption("Multi-Agent Cybersecurity Analyzer")
+        st.divider()
+
+        st.markdown("**Letzte Analysen (ChromaDB)**")
+
+        try:
+            db_entries = get_last_analyses(limit=8)
+        except Exception:
+            st.error("Fehler beim Laden der Historie")
+            db_entries = []
+
+        if db_entries:
+            for entry in reversed(db_entries):
+                try:
+                    content_data = json.loads(entry["content"])
+                    lvl   = content_data.get("risk_level", "UNKNOWN")
+                    score = content_data.get("score", "?")
+                except Exception:
+                    lvl   = "?"
+                    score = "?"
+
+                icon        = LEVEL_ICON.get(lvl, "⚪")
+                query_text  = entry["query"][:35]
+                ts          = entry.get("timestamp", "")
+                timestamp   = ts.split(" ")[1] if " " in ts else ""
+                button_label = f"{icon} {query_text}\n{lvl} · Score {score}/100 · {timestamp}"
+
+                if st.button(button_label, key=f"hist_{entry['id']}", use_container_width=True):
+                    st.session_state["active_report_query"]   = entry["query"]
+                    st.session_state["active_report_content"] = entry["content"]
+                    st.rerun()
+        else:
+            st.caption("Noch keine Analysen in der Datenbank vorhanden.")
+
+        st.divider()
+        st.caption(
+            "Agents: Input · Orchestrator · Domain · Email · CVE · Phone · File · Identity · Output"
+        )
+</file>
+
+<file path="app/ui/styles.py">
+"""
+app/ui/styles.py
+Globale CSS-Styles, Konstanten und kleine HTML-Hilfsfunktionen.
+"""
+
+CSS = """
+<style>
+.argus-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 0.5rem 0 1.5rem 0;
+    border-bottom: 1px solid rgba(128,128,128,0.2);
+    margin-bottom: 1.5rem;
+}
+.argus-title { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+.argus-sub   { font-size: 0.75rem; opacity: 0.45; margin: 0; letter-spacing: 0.05em; text-transform: uppercase; }
+
+.risk-badge { display: inline-block; padding: 5px 16px; border-radius: 999px; font-weight: 700; font-size: 0.9rem; letter-spacing: 0.05em; }
+.risk-LOW      { background: #d1fae5; color: #065f46; }
+.risk-MEDIUM   { background: #fef3c7; color: #92400e; }
+.risk-HIGH     { background: #fee2e2; color: #991b1b; }
+.risk-CRITICAL { background: #991b1b; color: #fff; animation: pulse 1.4s infinite; }
+.risk-UNKNOWN  { background: #e5e7eb; color: #374151; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.65} }
+
+.action-box { border-radius: 8px; padding: 1rem 1.2rem; font-size: 0.88rem; line-height: 1.75; }
+.action-prevent  { background: #fffbeb; border-left: 4px solid #f59e0b; color: #78350f; }
+.action-incident { background: #fff1f2; border-left: 4px solid #ef4444; color: #7f1d1d; }
+
+.live-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 0; font-size: 0.83rem;
+    border-bottom: 1px solid rgba(128,128,128,0.1);
+}
+.live-agent  { font-weight: 600; min-width: 110px; }
+.live-target { font-family: monospace; opacity: 0.7; font-size: 0.78rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-status { margin-left: auto; font-size: 0.85rem; }
+
+.memory-card {
+    background: rgba(128,128,128,0.06); border: 1px solid rgba(128,128,128,0.12);
+    border-radius: 8px; padding: 0.55rem 0.85rem; margin-bottom: 0.45rem; font-size: 0.8rem;
+}
+.memory-q   { font-weight: 600; margin-bottom: 2px; }
+.memory-lvl { font-size: 0.7rem; opacity: 0.45; }
+
+.score-bar-wrap { height: 8px; border-radius: 4px; background: rgba(128,128,128,0.15); margin-top: 6px; }
+.score-bar-fill { height: 8px; border-radius: 4px; }
+
+.indicator-pill {
+    background: rgba(239,68,68,0.07); border: 1px solid rgba(239,68,68,0.2);
+    border-radius: 6px; padding: 6px 10px; font-size: 0.8rem; margin-bottom: 6px;
+}
+</style>
+"""
+
+LEVEL_ICON = {
+    "LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴",
+    "CRITICAL": "🚨", "UNKNOWN": "⚪",
+}
+
+LEVEL_COLOR = {
+    "LOW": "#10b981", "MEDIUM": "#f59e0b", "HIGH": "#ef4444",
+    "CRITICAL": "#dc2626", "UNKNOWN": "#9ca3af",
+}
+
+AGENT_ICON = {
+    "input": "📥", "orchestrator": "🧠", "domain": "🌐",
+    "email": "📧", "cve": "🛡️", "phone": "📞",
+    "file": "📄", "identity": "👤", "output": "📊",
+}
+
+
+def level_badge(level: str) -> str:
+    """Gibt ein farbiges HTML-Badge für das Risiko-Level zurück."""
+    icon = LEVEL_ICON.get(level, "⚪")
+    return f'<span class="risk-badge risk-{level}">{icon} {level}</span>'
+
+
+def score_bar(score: int, color: str) -> str:
+    """Gibt einen farbigen HTML-Fortschrittsbalken zurück."""
+    pct = max(4, min(100, int(score)))
+    return (
+        f'<div class="score-bar-wrap">'
+        f'<div class="score-bar-fill" style="width:{pct}%;background:{color}"></div>'
+        f'</div>'
+    )
+</file>
+
+<file path="requirements-lock.txt">
+aiohappyeyeballs==2.6.2
+aiohttp==3.14.1
+aiosignal==1.4.0
+altair==6.2.1
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.14.0
+attrs==26.1.0
+bcrypt==5.0.0
+blinker==1.9.0
+build==1.5.0
+cachetools==7.1.4
+certifi==2026.6.17
+charset-normalizer==3.4.7
+chromadb==1.5.9
+click==8.4.1
+colorama==0.4.6
+distro==1.9.0
+dnspython==2.8.0
+durationpy==0.10
+filelock==3.29.4
+flatbuffers==25.12.19
+frozenlist==1.8.0
+fsspec==2026.6.0
+gitdb==4.0.12
+GitPython==3.1.50
+googleapis-common-protos==1.75.0
+greenlet==3.5.1
+grpcio==1.81.1
+h11==0.16.0
+hf-xet==1.5.1
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+httpx-sse==0.4.3
+huggingface_hub==1.19.0
+idna==3.18
+importlib_resources==7.1.0
+itsdangerous==2.2.0
+Jinja2==3.1.6
+jiter==0.15.0
+jsonpatch==1.33
+jsonpointer==3.1.1
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+kubernetes==36.0.2
+langchain==1.3.9
+langchain-classic==1.0.8
+langchain-community==0.4.2
+langchain-core==1.4.7
+langchain-openai==1.3.2
+langchain-protocol==0.0.17
+langchain-text-splitters==1.1.2
+langgraph==1.2.5
+langgraph-checkpoint==4.1.1
+langgraph-prebuilt==1.1.0
+langgraph-sdk==0.4.2
+langsmith==0.8.16
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+mdurl==0.1.2
+mmh3==5.2.1
+multidict==6.7.1
+narwhals==2.22.1
+numpy==2.4.6
+oauthlib==3.3.1
+onnxruntime==1.27.0
+openai==2.42.0
+opentelemetry-api==1.42.1
+opentelemetry-exporter-otlp-proto-common==1.42.1
+opentelemetry-exporter-otlp-proto-grpc==1.42.1
+opentelemetry-proto==1.42.1
+opentelemetry-sdk==1.42.1
+opentelemetry-semantic-conventions==0.63b1
+orjson==3.11.9
+ormsgpack==1.12.2
+overrides==7.7.0
+packaging==26.2
+pandas==3.0.3
+phonenumbers==9.0.32
+pillow==12.2.0
+propcache==0.5.2
+protobuf==6.33.6
+pyarrow==24.0.0
+pybase64==1.4.3
+pydantic==2.13.4
+pydantic-settings==2.14.1
+pydantic_core==2.46.4
+pydeck==0.9.2
+PyExifTool==0.5.6
+Pygments==2.20.0
+pypdf==6.13.2
+PyPika==0.51.1
+pyproject_hooks==1.2.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+python-multipart==0.0.32
+python-whois==0.9.6
+PyYAML==6.0.3
+referencing==0.37.0
+regex==2026.5.9
+requests==2.34.2
+requests-oauthlib==2.0.0
+requests-toolbelt==1.0.0
+rich==15.0.0
+rpds-py==2026.5.1
+shellingham==1.5.4
+six==1.17.0
+smmap==5.0.3
+sniffio==1.3.1
+SQLAlchemy==2.0.51
+starlette==1.3.1
+streamlit==1.58.0
+tenacity==9.1.4
+tiktoken==0.13.0
+tokenizers==0.23.1
+toml==0.10.2
+tqdm==4.68.3
+typer==0.25.1
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+tzdata==2026.2
+urllib3==2.7.0
+uuid_utils==0.16.1
+uvicorn==0.49.0
+watchdog==6.0.0
+watchfiles==1.2.0
+websocket-client==1.9.0
+websockets==15.0.1
+xxhash==3.7.0
+yarl==1.24.2
+zstandard==0.25.0
 </file>
 
 <file path=".env.example">
@@ -1871,740 +2919,87 @@ DOMAIN_TOOLS = [
 ]
 </file>
 
-<file path="app/ui.py">
+<file path="app/memory/chroma_memory.py">
+# Ergänzung / Refactoring von app/memory/chroma_memory.py
 import json
 
-import streamlit as st
-import time
-from app.graph import graph
-from app.memory.chroma_memory import get_last_analyses
+import chromadb
+import uuid
+import datetime
 
-st.set_page_config(
-    page_title="OSINT-Argus",
-    page_icon="👁️",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+client = chromadb.PersistentClient(path="./chroma_db")
+collection = client.get_or_create_collection("argus_memory")
+profile_collection = client.get_or_create_collection("user_profile")
 
-st.markdown("""
-<style>
-.argus-header {
-    display: flex; align-items: center; gap: 12px;
-    padding: 0.5rem 0 1.5rem 0;
-    border-bottom: 1px solid rgba(128,128,128,0.2);
-    margin-bottom: 1.5rem;
-}
-.argus-title { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
-.argus-sub   { font-size: 0.75rem; opacity: 0.45; margin: 0; letter-spacing: 0.05em; text-transform: uppercase; }
-
-.risk-badge { display: inline-block; padding: 5px 16px; border-radius: 999px; font-weight: 700; font-size: 0.9rem; letter-spacing: 0.05em; }
-.risk-LOW      { background: #d1fae5; color: #065f46; }
-.risk-MEDIUM   { background: #fef3c7; color: #92400e; }
-.risk-HIGH     { background: #fee2e2; color: #991b1b; }
-.risk-CRITICAL { background: #991b1b; color: #fff; animation: pulse 1.4s infinite; }
-.risk-UNKNOWN  { background: #e5e7eb; color: #374151; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.65} }
-
-.action-box { border-radius: 8px; padding: 1rem 1.2rem; font-size: 0.88rem; line-height: 1.75; }
-.action-prevent  { background: #fffbeb; border-left: 4px solid #f59e0b; color: #78350f; }
-.action-incident { background: #fff1f2; border-left: 4px solid #ef4444; color: #7f1d1d; }
-
-.live-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 5px 0; font-size: 0.83rem;
-    border-bottom: 1px solid rgba(128,128,128,0.1);
-}
-.live-agent  { font-weight: 600; min-width: 110px; }
-.live-target { font-family: monospace; opacity: 0.7; font-size: 0.78rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.live-status { margin-left: auto; font-size: 0.85rem; }
-
-.memory-card {
-    background: rgba(128,128,128,0.06); border: 1px solid rgba(128,128,128,0.12);
-    border-radius: 8px; padding: 0.55rem 0.85rem; margin-bottom: 0.45rem; font-size: 0.8rem;
-}
-.memory-q   { font-weight: 600; margin-bottom: 2px; }
-.memory-lvl { font-size: 0.7rem; opacity: 0.45; }
-
-.score-bar-wrap { height: 8px; border-radius: 4px; background: rgba(128,128,128,0.15); margin-top: 6px; }
-.score-bar-fill { height: 8px; border-radius: 4px; }
-
-.indicator-pill {
-    background: rgba(239,68,68,0.07); border: 1px solid rgba(239,68,68,0.2);
-    border-radius: 6px; padding: 6px 10px; font-size: 0.8rem; margin-bottom: 6px;
-}
-</style>
-""", unsafe_allow_html=True)
-
-LEVEL_ICON  = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨", "UNKNOWN": "⚪"}
-LEVEL_COLOR = {"LOW": "#10b981", "MEDIUM": "#f59e0b", "HIGH": "#ef4444", "CRITICAL": "#dc2626", "UNKNOWN": "#9ca3af"}
-AGENT_ICON  = {
-    "input": "📥", "orchestrator": "🧠", "domain": "🌐",
-    "email": "📧", "cve": "🛡️", "phone": "📞",
-    "file": "📄", "identity": "👤", "output": "📊",
-}
-
-def level_badge(level: str) -> str:
-    return f'<span class="risk-badge risk-{level}">{LEVEL_ICON.get(level,"⚪")} {level}</span>'
-
-def score_bar(score: int, color: str) -> str:
-    pct = max(4, min(100, int(score)))
-    return (
-        f'<div class="score-bar-wrap">'
-        f'<div class="score-bar-fill" style="width:{pct}%;background:{color}"></div>'
-        f'</div>'
-    )
-
-
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-def render_sidebar():
-    with st.sidebar:
-        st.markdown("## 👁️ OSINT-Argus")
-        st.caption("Multi-Agent Cybersecurity Analyzer")
-        st.divider()
-        
-        st.markdown("**Letzte Analysen (ChromaDB)**")
-        
-        # 1. Daten live aus der ChromaDB abfragen (die letzten 8 Analysen)
-        try:
-            db_entries = get_last_analyses(limit=8)
-        except Exception as e:
-            st.error("Fehler beim Laden der Historie")
-            db_entries = []
-            
-        if db_entries:
-            # Neueste Analysen ganz oben anzeigen
-            for entry in reversed(db_entries):
-                # ChromaDB speichert Dokumente als Strings. Wenn du dort JSON ablegst, extrahieren wir es:
-                try:
-                    # Versuche, den gespeicherten Inhalt als JSON zu parsen (falls strukturiert abgelegt)
-                    content_data = json.loads(entry["content"])
-                    lvl = content_data.get("risk_level", "UNKNOWN")
-                    score = content_data.get("score", "?")
-                except Exception:
-                    # Fallback, falls du flachen Text/Report in die DB schreibst
-                    lvl = "?"
-                    score = "?"
-                
-                # Icons und Query vorbereiten
-                icon = LEVEL_ICON.get(lvl, "⚪") if 'LEVEL_ICON' in globals() else "⚪"
-                query_text = entry["query"][:35]
-                timestamp = entry.get("timestamp", "").split(" ")[1] if " " in entry.get("timestamp", "") else ""
-                
-                # Beschriftung für den Button bauen (Zweizeilig durch Zeilenumbruch)
-                button_label = f"{icon} {query_text}\n{lvl} · Score {score}/100 · {timestamp}"
-                
-                # Einzigartiger Key für Streamlit, basierend auf der Chroma-ID
-                if st.button(button_label, key=f"hist_{entry['id']}", use_container_width=True):
-                    # Wenn der User klickt, laden wir die Daten in den Session-State
-                    st.session_state["active_report_query"] = entry["query"]
-                    st.session_state["active_report_content"] = entry["content"]
-                    st.rerun() # UI neu laden, um den alten Report im Hauptfenster zu rendern
-                    
-        else:
-            st.caption("Noch keine Analysen in der Datenbank vorhanden.")
-            
-        st.divider()
-        st.caption("Agents: Input · Orchestrator · Domain · Email · CVE · Phone · File · Identity · Output")
-
-# ── NEU: WEICHE FÜR GELADENEN ARCHIV-REPORT ──────────────────────────────
-def check_archiv():
-    if "active_report_content" in st.session_state:
-        st.markdown(
-            '<div class="argus-header">'
-            '<span style="font-size:2.2rem">📜</span>'
-            '<div><p class="argus-title">Archivierter Befund</p>'
-            f'<p class="argus-sub">Eingabe: {st.session_state["active_report_query"][:80]}...</p></div>'
-            '</div>', unsafe_allow_html=True,
-        )
-        st.info("ℹ️ Sie betrachten eine historische Analyse aus der ChromaDB-Vektordatenbank.")
-        
-        try:
-            # Dekodiere den JSON-String aus ChromaDB
-            data = json.loads(st.session_state["active_report_content"])
-            
-            lvl = data.get("risk_level", "UNKNOWN")
-            score = data.get("score", 0)
-            summary = data.get("summary", "")
-            indicators = data.get("indicators", [])
-            prevent_text = data.get("action_prevent", "")
-            incident_steps = data.get("action_incident_response", [])
-
-            # 1. Scores & Badge anzeigen
-            col_ts, col_vs, col_lvl = st.columns([1, 1, 1])
-            with col_ts:
-                st.markdown("**Risiko-Score**")
-                color_t = LEVEL_COLOR.get(lvl, "#9ca3af")
-                st.markdown(
-                    f'<span style="font-size:2.2rem;font-weight:700">{score}</span>'
-                    f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
-                    f'{score_bar(score, color_t)}',
-                    unsafe_allow_html=True,
-                )
-            with col_vs:
-                st.markdown("**Datenquelle**")
-                st.markdown('<span style="font-size:1.5rem;font-weight:600;display:block;margin-top:8px;">ChromaDB Persistent</span>', unsafe_allow_html=True)
-            with col_lvl:
-                st.markdown("**Gesamteinstufung**")
-                st.markdown(level_badge(lvl), unsafe_allow_html=True)
-
-            # 2. Zusammenfassung
-            if summary:
-                st.markdown("---")
-                st.markdown("#### Zusammenfassung")
-                st.info(summary)
-
-            # 3. Indikatoren
-            if indicators:
-                st.markdown("#### 💡 Haupt-Risikoindikatoren")
-                cols = st.columns(3)
-                for i, ind in enumerate(indicators[:9]):
-                    clean = ind.replace("**", "").replace("`", "").strip("- ").strip()
-                    if not clean:
-                        continue
-                    with cols[i % 3]:
-                        st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
-
-            # 4. Handlungsempfehlungen
-            st.markdown("---")
-            st.markdown("#### Handlungsempfehlungen")
-            col_p, col_i = st.columns(2)
-            with col_p:
-                st.markdown("🚫 **Unbedingt vermeiden**")
-                st.markdown(
-                    f'<div class="action-box action-prevent">{prevent_text}</div>',
-                    unsafe_allow_html=True,
-                )
-            with col_i:
-                st.markdown("🔥 **Falls bereits geklickt**")
-                if incident_steps:
-                    incident_text = "<br>".join([f"{step}" if step.startswith(('1.', '2.', '3.', '4.')) else f"{idx+1}. {step}" for idx, step in enumerate(incident_steps)])
-                else:
-                    incident_text = "Keine spezifischen Incident-Response-Schritte hinterlegt."
-                st.markdown(
-                    f'<div class="action-box action-incident">{incident_text}</div>',
-                    unsafe_allow_html=True,
-                )
-
-        except Exception as e:
-            # Fallback, falls noch unstrukturierte Altdaten in ChromaDB liegen
-            st.warning("Das Format dieser alten Analyse ist unstrukturiert. Zeige Rohdaten an:")
-            st.text_area("Report Rohdaten", st.session_state["active_report_content"], height=350)
-
-        st.markdown("---")
-        if st.button("🔄 Neue Analyse starten", type="primary"):
-            del st.session_state["active_report_content"]
-            del st.session_state["active_report_query"]
-            st.rerun()
-            
-        return True # Beendet die Anzeige des Archivs erfolgreich
-
-    return False # Signalisiert main(), dass kein Archiv-Eintrag geladen ist
-# ── State builder ─────────────────────────────────────────────────────────────
-def build_initial_state(user_input: str) -> dict:
-    return {
-        "user_input": user_input, "input_type": "unknown",
-        "current_agent": "input", "next_agent": "",
-        "findings": [], "risk_score": None, "summary": None,
-        "memory_context": None, "to_scan": [], "scanned": [],
-        "current_check": None, "file_paths": [], "file_hashes": [],
-    }
-
-
-# ── Live pipeline runner ──────────────────────────────────────────────────────
-def run_with_live_log(user_input: str):
-    state    = build_initial_state(user_input)
-    log_slot = st.empty()
-    log_rows = []   # (agent, target, done)
-    t0       = time.time()
-
-    def render_log():
-        rows_html = ""
-        for agent, target, done in log_rows[-14:]:
-            icon   = AGENT_ICON.get(agent, "⚙️")
-            status = "✅" if done else "⏳"
-            tgt    = target[:60] if target else ""
-            rows_html += (
-                f'<div class="live-row">'
-                f'<span style="font-size:1rem">{icon}</span>'
-                f'<span class="live-agent">{agent.upper()}</span>'
-                f'<span class="live-target">{tgt}</span>'
-                f'<span class="live-status">{status}</span>'
-                f'</div>'
-            )
-        elapsed = round(time.time() - t0, 1)
-        log_slot.markdown(
-            f'<div style="border:1px solid rgba(128,128,128,0.15);border-radius:10px;padding:1rem 1.2rem;margin:0.5rem 0">'
-            f'<div style="font-size:0.7rem;opacity:0.4;margin-bottom:0.6rem;letter-spacing:0.08em">AGENT PIPELINE · {elapsed}s</div>'
-            f'{rows_html}'
-            f'</div>', unsafe_allow_html=True,
-        )
-
-    # We accumulate ALL findings across stream chunks into one list
-    all_findings = []
-    final_state  = state.copy()
-
-    for chunk in graph.stream(state, stream_mode="updates"):
-        for node_name, node_state in chunk.items():
-            # Mark previous step done
-            if log_rows:
-                prev = log_rows[-1]
-                log_rows[-1] = (prev[0], prev[1], True)
-
-            target = node_state.get("current_check") or ""
-            log_rows.append((node_name, target, False))
-            render_log()
-
-            # Merge scalars
-            for key in ("risk_score", "risk_level", "summary", "action_advice",
-                        "input_type", "memory_context", "next_agent", "current_check"):
-                if node_state.get(key) is not None:
-                    final_state[key] = node_state[key]
-
-            # Accumulate findings (never overwrite, only extend)
-            if node_state.get("findings"):
-                all_findings.extend(node_state["findings"])
-
-            # Keep latest queue state
-            for key in ("to_scan", "scanned"):
-                if key in node_state:
-                    final_state[key] = node_state[key]
-
-    # Mark last step done
-    if log_rows:
-        prev = log_rows[-1]
-        log_rows[-1] = (prev[0], prev[1], True)
-    render_log()
-
-    final_state["findings"] = all_findings
-    return final_state
-
-
-# ── Helpers for extracting OutputAgent report from findings ───────────────────
-def extract_output_report(findings: list) -> dict:
+def save_analysis(query: str, content: str):
     """
-    OutputAgent appends a Findings object with:
-      threat_sum = ["Threat Score: 95", "Level: CRITICAL"]
-      vulnerability_sum = ["Vulnerability Score: 85", "indicator1", ...]
-    We parse those — because stream_mode="updates" only returns keys in
-    ArgusState TypedDict, and risk_level/risk_score are missing from it.
+    Speichert den Input (query) und die Ergebnisse/Zusammenfassung (content).
     """
-    threat_score = vuln_score = None
-    risk_level   = None
-    indicators   = []
-
-    for f in findings:
-        agent_val  = str(getattr(getattr(f, "agent", ""), "value", ""))
-        threat_sum = getattr(f, "threat_sum", [])
-        vuln_sum   = getattr(f, "vulnerability_sum", [])
-
-        if agent_val != "orchestrator":
-            continue
-        if not any("Threat Score" in str(t) for t in threat_sum):
-            continue
-
-        for t in threat_sum:
-            s = str(t)
-            if "Threat Score" in s:
-                try: threat_score = int(s.split(":")[-1].strip())
-                except: pass
-            if "Level" in s:
-                try: risk_level = s.split(":")[-1].strip()
-                except: pass
-
-        for v in vuln_sum:
-            s = str(v)
-            if "Vulnerability Score" in s:
-                try: vuln_score = int(s.split(":")[-1].strip())
-                except: pass
-            else:
-                indicators.append(s)
-
-    return {
-        "threat_score": threat_score,
-        "vuln_score":   vuln_score,
-        "risk_level":   risk_level,
-        "indicators":   indicators,
-    }
-
-
-# ── Render results ────────────────────────────────────────────────────────────
-def render_results(result: dict):
-    findings   = result.get("findings") or []
-
-    # Extract everything from the OutputAgent findings object —
-    # stream_mode="updates" does NOT return risk_level/risk_score/summary/action_advice
-    # because they are missing from ArgusState TypedDict.
-    report = extract_output_report(findings)
-
-    threat_score = report["threat_score"] or 0
-    vuln_score   = report["vuln_score"]   or 0
-    risk_level   = report["risk_level"]   or result.get("risk_level") or "UNKNOWN"
-    risk_score   = max(threat_score, vuln_score)
-    indicators   = report["indicators"]
-
-    # summary and action_advice: try state first, then fall back to findings text
-    summary    = result.get("summary") or ""
-    action_adv = result.get("action_advice") or ""
-
-    st.markdown("---")
-
-    # ── Score row — use the REAL scores from OutputAgent ─────────────────────
-    col_ts, col_vs, col_lvl = st.columns([1, 1, 1])
-
-    with col_ts:
-        st.markdown("**Bedrohungs-Score**")
-        color_t = LEVEL_COLOR.get(risk_level, "#9ca3af")
-        st.markdown(
-            f'<span style="font-size:2.2rem;font-weight:700">{threat_score}</span>'
-            f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
-            f'{score_bar(threat_score, color_t)}',
-            unsafe_allow_html=True,
-        )
-    with col_vs:
-        st.markdown("**Schwachstellen-Score**")
-        st.markdown(
-            f'<span style="font-size:2.2rem;font-weight:700">{vuln_score}</span>'
-            f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
-            f'{score_bar(vuln_score, "#f59e0b")}',
-            unsafe_allow_html=True,
-        )
-    with col_lvl:
-        st.markdown("**Gesamteinstufung**")
-        st.markdown(level_badge(risk_level), unsafe_allow_html=True)
-        if risk_level == "CRITICAL":
-            st.error("Sofortiger Handlungsbedarf!")
-        elif risk_level == "HIGH":
-            st.warning("Erhöhtes Risiko — Vorsicht geboten.")
-        elif risk_level == "MEDIUM":
-            st.info("Moderates Risiko — aufmerksam bleiben.")
-        else:
-            st.success("Kein akutes Risiko erkannt.")
-
-    # ── Summary ───────────────────────────────────────────────────────────────
-    if summary:
-        st.markdown("---")
-        st.markdown("#### Zusammenfassung")
-        st.info(summary)
-
-    # ── Indicators ────────────────────────────────────────────────────────────
-    if indicators:
-        st.markdown("#### 💡 Haupt-Risikoindikatoren")
-        cols = st.columns(3)
-        for i, ind in enumerate(indicators[:9]):
-            clean = ind.replace("**", "").replace("`", "").strip("- ").strip()
-            if not clean:
-                continue
-            with cols[i % 3]:
-                st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
-
-    # ── Action advice ─────────────────────────────────────────────────────────
-    if action_adv:
-        st.markdown("---")
-        st.markdown("#### Handlungsempfehlungen")
-
-        # Split on the marker the OutputAgent uses
-        split_marker = "FALLS BEREITS GEKLICKT:"
-        if split_marker in action_adv:
-            parts = action_adv.split(split_marker, 1)
-            prevent_text  = parts[0].replace("PRÄVENTION:", "").strip()
-            incident_text = parts[1].strip()
-        else:
-            # OutputAgent sometimes uses newline-separated numbered lists without the marker
-            prevent_text  = action_adv.strip()
-            incident_text = ""
-
-        col_p, col_i = st.columns(2)
-        with col_p:
-            st.markdown("🚫 **Unbedingt vermeiden**")
-            # Render as markdown so bold/lists work
-            st.markdown(
-                f'<div class="action-box action-prevent">{prevent_text}</div>',
-                unsafe_allow_html=True,
-            )
-        with col_i:
-            if incident_text:
-                st.markdown("🔥 **Falls bereits geklickt**")
-                st.markdown(
-                    f'<div class="action-box action-incident">{incident_text}</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown("🔥 **Falls bereits geklickt**")
-                st.markdown(
-                    '<div class="action-box action-incident">'
-                    '1. Gerät sofort vom Netzwerk trennen.<br>'
-                    '2. Passwörter von einem sicheren Gerät ändern.<br>'
-                    '3. Bank / IT-Sicherheit kontaktieren.<br>'
-                    '4. Gerät auf Malware scannen.'
-                    '</div>',
-                    unsafe_allow_html=True,
-                )
-
-    # ── Agent findings detail ─────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("#### Agent-Findings (Detail)")
-
-    # Show only real agent findings — skip orchestrator routing logs and the output summary
-    display_findings = []
-    seen = set()
-    for f in findings:
-        agent_val = str(getattr(getattr(f, "agent", ""), "value", ""))
-        inp       = getattr(f, "input", "")
-        key       = (agent_val, inp)
-        if agent_val == "orchestrator":
-            continue
-        if key in seen:
-            continue
-        seen.add(key)
-        display_findings.append(f)
-
-    if not display_findings:
-        st.caption("Keine Detail-Findings vorhanden.")
-    else:
-        for f in display_findings:
-            agent_val  = str(getattr(getattr(f, "agent", ""), "value", "?"))
-            inp        = getattr(f, "input", "")
-            threats    = getattr(f, "threat_sum", [])
-            vulns      = getattr(f, "vulnerability_sum", [])
-            icon       = AGENT_ICON.get(agent_val, "⚙️")
-
-            with st.expander(f"{icon} {agent_val.upper()} — {inp[:60]}", expanded=False):
-                if threats:
-                    st.markdown("**🎯 Bedrohungen**")
-                    for t in threats:
-                        if str(t).strip():
-                            st.markdown(f"- {t}")
-                if vulns:
-                    st.markdown("**🔍 Schwachstellen / Befunde**")
-                    for v in vulns:
-                        if str(v).strip():
-                            st.markdown(f"- {v}")
-                if not threats and not vulns:
-                    st.caption("Keine Befunde.")
-
-
-# ── Main ──────────────────────────────────────────────────────────────────────
-def main():
-    render_sidebar()
-
-    if check_archiv(): return
-
-    st.markdown(
-        '<div class="argus-header">'
-        '<span style="font-size:2.2rem">👁️</span>'
-        '<div><p class="argus-title">OSINT-Argus</p>'
-        '<p class="argus-sub">Multi-Agent Cybersecurity Analyzer</p></div>'
-        '</div>', unsafe_allow_html=True,
-    )
-
-    col_input, col_help = st.columns([3, 1])
-    with col_input:
-        user_input = st.text_area(
-            "Input",
-            placeholder=(
-                "Domain          →  example.com\n"
-                "E-Mail-Adresse  →  user@domain.com\n"
-                "E-Mail-Inhalt   →  komplette Mail hier reinkopieren\n"
-                "Telefonnummer   →  +49 151 12345678\n"
-                "Dateipfad/Hash  →  /pfad/zur/datei.pdf"
-            ),
-            height=190,
-            label_visibility="collapsed",
-        )
-    with col_help:
-        st.markdown("**Unterstützte Inputs**")
-        for line in ["🌐 Domain / URL", "📧 E-Mail-Adresse", "📨 E-Mail-Inhalt",
-                     "📞 Telefonnummer", "📄 Datei / Hash", "🔎 Software + Version"]:
-            st.caption(line)
-
-    run_col, clear_col, _ = st.columns([1, 1, 4])
-    with run_col:
-        run_btn = st.button("🔍 Analysieren", type="primary", use_container_width=True)
-    with clear_col:
-        if st.button("✕ Leeren", use_container_width=True):
-            st.session_state.pop("last_result", None)
-            st.rerun()
-
-    if run_btn:
-        if not user_input or not user_input.strip():
-            st.warning("Bitte einen Input eingeben.")
-        else:
-            t0 = time.time()
-            try:
-                result  = run_with_live_log(user_input.strip())
-                elapsed = round(time.time() - t0, 1)
-                st.success(f"✅ Analyse abgeschlossen in {elapsed}s")
-            except Exception as e:
-                st.error(f"❌ Pipeline-Fehler: {type(e).__name__}: {e}")
-                st.stop()
-
-            if "history" not in st.session_state:
-                st.session_state["history"] = []
-            st.session_state["history"].append({
-                "query":      user_input.strip()[:60],
-                "risk_level": result.get("risk_level", "UNKNOWN"),
-                "score":      result.get("risk_score", 0),
-            })
-            st.session_state["last_result"] = result
-
-    if "last_result" in st.session_state:
-        render_results(st.session_state["last_result"])
-
-
-if __name__ == "__main__":
-    main()
-</file>
-
-<file path="app/agents/output_agent.py">
-import json
-from langchain_core.prompts import ChatPromptTemplate
-from app.agents.base_agent import BaseAgent
-from app.models.router import OutputReport
-from app.state import ArgusState
-from app.models.llm import get_llm
-from app.models.findings import Findings
-from app.models.agent_type import AgentType
-from app.memory.chroma_memory import save_analysis
-
-llm = get_llm()
-
-SYSTEM_PROMPT = """Du bist der OutputAgent von OSINT-Argus. Deine Aufgabe ist es, aus allen gesammelten Agenten-Findings einen finalen, nicht-deterministischen Cybersecurity-Risikobericht zu generieren.
-
-Analysiere die Findings aus zwei Blickwinkeln:
-1. Threat Score (0-100): Gibt es Anzeichen für aktive Angreifer, Phishing-Absichten, Malware (URLhaus) oder böswillige Absichten?
-2. Vulnerability Score (0-100): Gibt es offene Flanken? (Fehlendes SPF/DMARC, abgelaufenes SSL, bekannte Software-CVEs)?
-
-Leite daraus das risk_level ab:
-- LOW (Scores vorwiegend < 33)
-- MEDIUM (Scores vorwiegend 34-66)
-- HIGH (Scores vorwiegend 67-84)
-- CRITICAL (Scores vorwiegend 85-100 oder akuter Phishing/Malware-Befund)
-
-WICHTIG FÜR DIE HANDLUNGSANWEISUNGEN:
-- Formuliere in 'action_prevent' eine klare Warnung, was auf KEINEN Fall getan werden darf (z.B. 'Nicht auf Links klicken, da...').
-- Erstelle in 'action_incident_response' eine klare, chronologische 1., 2., 3.-Schritt-Anleitung für den Fall, DASS der Nutzer bereits auf den Link geklickt, die Datei geöffnet oder mit dem Absender interagiert hat.
-
-Regeln:
-- Tool-Fehler/Timeouts fließen NICHT negativ in die Scores ein.
-- Nutze nur explizit beobachtete Fakten aus den Findings. Erfinde nichts.
-"""
-
-def _format_findings_for_llm(state: ArgusState) -> str:
-    """Extrahiert Daten direkt aus den Attributen der neuen Findings-Dataclass."""
-    if not state.get("findings"):
-        return "Keine Findings vorhanden."
-        
-    lines = []
-    for f in state["findings"]:
-        # Bestimme den Namen des Agenten aus dem Enum oder String
-        agent_name = f.agent.value if hasattr(f.agent, "value") else str(f.agent)
-        
-        lines.append(
-            f"=== Finding von Agent: {agent_name} ===\n"
-            f"Prüfobjekt (Input): {f.input}\n"
-            f"Bedrohungen (Threats): {f.threat_sum}\n"
-            f"Schwachstellen (Vulnerabilities): {f.vulnerability_sum}\n"
-        )
-    return "\n".join(lines)
-
-
-class OutputAgent(BaseAgent):
-
-    def __init__(self):
-        # Nutzen des erweiterten Pydantic-Modells
-        self._llm = llm.with_structured_output(OutputReport)
-
-    def run(self, state: ArgusState) -> ArgusState:
-        input_type = state.get("input_type", "unknown")
-        findings_text = _format_findings_for_llm(state)
-
-        prompt_input = (
-            f"Eingabetyp des Systems: {input_type}\n\n"
-            f"=== ALLE AGENTEN FINDINGS ===\n{findings_text}\n\n"
-            f"Erstelle den finalen Risikobericht inklusive Vorbeugung und Incident-Response-Schritten."
-        )
-
-        try:
-            report: OutputReport = self._llm.invoke([
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": prompt_input},
-            ])
-        except Exception as e:
-            print(f"⚠️ OutputAgent: Structured output fehlgeschlagen — {e}")
-            # Fallback bei unerwarteten API- oder Parsingfehlern
-            report = OutputReport(
-                threat_score=50,
-                vulnerability_score=50,
-                risk_level="MEDIUM",
-                explanation="Der Bericht konnte aufgrund eines technischen Fehlers nicht generiert werden.",
-                summary="Automatische Berichterstellung fehlgeschlagen.",
-                action_prevent="Interagiere nicht mit den Objekten, bis eine manuelle Prüfung stattfand.",
-                action_incident_response=["1. System isolieren", "2. IT-Sicherheit kontaktieren"],
-                indicators=["Parsing-Fehler im OutputAgent"]
-            )
-
-        # ── State befüllen ───────────────────────────────────────────────────
-        state["risk_score"] = max(report.threat_score, report.vulnerability_score) 
-        state["risk_level"] = report.risk_level
-        state["summary"] = report.summary
-        state["action_advice"] = f"PRÄVENTION:\n{report.action_prevent}\n\nFALLS BEREITS GEKLICKT:\n" + "\n".join(report.action_incident_response)
-
-        # Hänge den finalen Report als echtes Findings-Objekt an die Liste an
-        final_finding = Findings(
-            agent=AgentType.ORCHESTRATOR, 
-            input="Zusammenfassung aller Findings",
-            threat_sum=[f"Threat Score: {report.threat_score}", f"Level: {report.risk_level}"],
-            vulnerability_sum=[f"Vulnerability Score: {report.vulnerability_score}"] + report.indicators
-        )
-        state["findings"].append(final_finding)
-
-        # ── NEU: Strukturiertes JSON für ChromaDB bauen ──────────────────────
-        # Wir packen alle wichtigen Metadaten direkt in das Dokument, damit 
-        # die Sidebar darauf zugreifen kann.
-        chroma_payload = {
-            "risk_level": report.risk_level,
-            "score": max(report.threat_score, report.vulnerability_score),
-            "summary": report.summary,
-            "indicators": report.indicators,
-            "action_prevent": report.action_prevent,
-            "action_incident_response": report.action_incident_response
-        }
-
-        # Als JSON-String serialisiert in die ChromaDB wegschreiben
-        save_analysis(
-            query=state.get("user_input", ""),
-            content=json.dumps(chroma_payload, ensure_ascii=False)
-        )
-
-        # ── Ausgabe im Terminal ──────────────────────────────────────────────
-        self._print_custom_report(report)
-
-        return state
+    # Um Duplikate bei gleichem Input zu vermeiden oder historische Versionen zu erlauben,
+    # nutzen wir eine UUID als primäre ID und packen die Query in die Metadaten.
+    analysis_id = str(uuid.uuid4())
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    def _print_custom_report(self, report: OutputReport) -> None:
-        """Übersichtliche und detaillierte Konsolenausgabe des neuen Reports."""
-        level_icons = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨"}
-        icon = level_icons.get(report.risk_level, "⚪")
+    collection.add(
+        documents=[content],
+        ids=[analysis_id],
+        metadatas=[{
+            "query": query,
+            "timestamp": timestamp
+        }],
+    )
 
-        print("\n" + "═" * 60)
-        print(f"  {icon}  OSINT-ARGUS FINALER RISIKOBERICHT  {icon}")
-        print("═" * 60)
-        print(f"  Bedrohungs-Score (Threat)      : {report.threat_score}/100")
-        print(f"  Schwachstellen-Score (Vuln)    : {report.vulnerability_score}/100")
-        print(f"  Gesamteinstufung                : [{report.risk_level}]")
-        print("-" * 60)
-        print(f"  Zusammenfassung (Laie):\n  {report.summary}")
-        print("-" * 60)
-        print(f"  🚨 WICHTIG - UNBEDINGT VERMEIDEN:\n  {report.action_prevent}")
-        print("-" * 60)
-        print(f"  🔥 FALLS DU BEREITS GEKLICKT HAST:")
-        for i, step in enumerate(report.action_incident_response, 1):
-            print(f"    {step}")
-        print("-" * 60)
-        print(f"  💡 Haupt-Risikoindikatoren:")
-        for ind in report.indicators:
-            print(f"     • {ind}")
-        print("═" * 60 + "\n")
+def get_last_analyses(limit=10):
+    """
+    Holt die letzten Analysen sortiert nach Auftreten.
+    """
+    data = collection.get()
+    if not data or not data["ids"]:
+        return []
+
+    docs = []
+    # Zusammenführen für einfachere UI-Iteration
+    for idx in range(len(data["ids"])):
+        docs.append({
+            "id": data["ids"][idx],
+            "query": data["metadatas"][idx].get("query", "Unbekannte Suche"),
+            "timestamp": data["metadatas"][idx].get("timestamp", ""),
+            "content": data["documents"][idx]
+        })
+    
+    # Optional nach Zeitstempel sortieren oder einfach die neuesten zurückgeben
+    return docs[-limit:]
+
+def get_user_profile() -> dict:
+    """
+    Lädt das aktuelle, aggregierte Benutzerprofil aus ChromaDB.
+    Gibt ein Standardprofil zurück, wenn noch keins existiert.
+    """
+    default_profile = {
+        "vorname": "Unbekannt",
+        "nachname": "Unbekannt",
+        "email": "Unbekannt",
+        "telefon": "Unbekannt",
+        "kompetenz_level": "UNBEKANNT",
+        "fachbegriffe": [],
+        "charakteristik": "Noch keine ausreichenden Textdaten analysiert."
+    }
+    
+    try:
+        res = profile_collection.get(ids=["global_user_profile"])
+        if res and res["documents"]:
+            return json.loads(res["documents"][0])
+    except Exception:
+        pass
+    return default_profile
+
+def save_user_profile(profile_data: dict):
+    """Persistiert das aktualisierte Benutzerprofil in ChromaDB."""
+    profile_collection.upsert(
+        ids=["global_user_profile"],
+        documents=[json.dumps(profile_data, ensure_ascii=False)],
+        metadatas=[{"updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]
+    )
 </file>
 
 <file path="app/models/llm.py">
@@ -2829,81 +3224,159 @@ class DomainAgent(BaseAgent):
         return state
 </file>
 
-<file path="app/agents/input_agent.py">
+<file path="app/agents/output_agent.py">
 import json
-from pydantic import BaseModel, Field
-from typing import Literal, List
+from langchain_core.prompts import ChatPromptTemplate
 from app.agents.base_agent import BaseAgent
+from app.models.router import OutputReport
 from app.state import ArgusState
 from app.models.llm import get_llm
+from app.models.findings import Findings
+from app.models.agent_type import AgentType
+from app.memory.chroma_memory import save_analysis
 
-class InputExtraction(BaseModel):
-    input_type: Literal["domain", "email", "text", "phone", "file", "identity", "unknown"] = Field(
-        description="Der primäre Typ des empfangenen Gesamt-Inputs."
-    )
-    extracted_targets: List[str] = Field(
-        description="Liste aller extrahierten Entitäten, die gescannt werden müssen (E-Mail-Adressen, Domains, IPs, Telefonnummern, Software-Namen, Identitäten, Hashes oder Dateipfade)."
-    )
+llm = get_llm()
 
-class InputAgent(BaseAgent):
+SYSTEM_PROMPT = """Du bist der OutputAgent von OSINT-Argus. Deine Aufgabe ist es, aus allen gesammelten Agenten-Findings einen finalen, nicht-deterministischen Cybersecurity-Risikobericht zu generieren.
+
+Analysiere die Findings aus zwei Blickwinkeln:
+1. Threat Score (0-100): Gibt es Anzeichen für aktive Angreifer, Phishing-Absichten, Malware (URLhaus) oder böswillige Absichten?
+2. Vulnerability Score (0-100): Gibt es offene Flanken? (Fehlendes SPF/DMARC, abgelaufenes SSL, bekannte Software-CVEs)?
+
+KALIBRIERUNGS- UND SCORING-REGELN (Score-Sensitivität reduzieren):
+- EXPLIZITE SCORE-ANKER: Fehlende DNS-Infrastruktur-Records dürfen nicht übergewichtet werden. Ein fehlender SPF-Record erhöht den Vulnerability Score um maximal +15 Punkte (nicht +50). Ein fehlender DMARC-Record erhöht den Vulnerability Score um maximal +10 Punkte.
+- FEHLER-NEUTRALITÄT: Tool-Fehler, API-Timeouts und "UNKNOWN"-Verdicts fließen NICHT negativ in die Scores ein und erhöhen die Scores explizit um 0 Punkte. Sie sind vollkommen neutral zu behandeln.
+- HARTE CRITICAL-ANFORDERUNG: Das risk_level 'CRITICAL' erfordert zwingend mindestens einen aktiven Malware- oder Phishing-Befund (z. B. aus URLhaus, VirusTotal mit Malicious Hits > 0, oder einer verifizierten Phishing-Blacklist) — fehlende Records oder reine Konfigurationsfehler alleine reichen für CRITICAL nicht aus (hier maximal MEDIUM oder HIGH vergeben).
+
+Leite daraus das risk_level ab:
+- LOW (Scores vorwiegend < 33)
+- MEDIUM (Scores vorwiegend 34-66)
+- HIGH (Scores vorwiegend 67-84)
+- CRITICAL (Scores vorwiegend 85-100 UND zwingend ein akuter, aktiver Phishing/Malware-Befund vorhanden)
+
+WICHTIG FÜR DIE HANDLUNGSANWEISUNGEN:
+- Formuliere in 'action_prevent' eine klare Warnung, was auf KEINEN Fall getan werden darf (z.B. 'Nicht auf Links klicken, da...').
+- Erstelle in 'action_incident_response' eine klare, chronologische 1., 2., 3.-Schritt-Anleitung für den Fall, DASS der Nutzer bereits auf den Link geklickt, die Datei geöffnet oder mit dem Absender interagiert hat.
+
+Regeln:
+- Nutze nur explizit beobachtete Fakten aus den Findings. Erfinde nichts.
+"""
+def _format_findings_for_llm(state: ArgusState) -> str:
+    """Extrahiert Daten direkt aus den Attributen der neuen Findings-Dataclass."""
+    if not state.get("findings"):
+        return "Keine Findings vorhanden."
+        
+    lines = []
+    for f in state["findings"]:
+        # Bestimme den Namen des Agenten aus dem Enum oder String
+        agent_name = f.agent.value if hasattr(f.agent, "value") else str(f.agent)
+        
+        lines.append(
+            f"=== Finding von Agent: {agent_name} ===\n"
+            f"Prüfobjekt (Input): {f.input}\n"
+            f"Bedrohungen (Threats): {f.threat_sum}\n"
+            f"Schwachstellen (Vulnerabilities): {f.vulnerability_sum}\n"
+        )
+    return "\n".join(lines)
+
+
+class OutputAgent(BaseAgent):
+
     def __init__(self):
-        # Wir zwingen das LLM, strukturiert zu antworten
-        self.llm = get_llm().with_structured_output(InputExtraction)
+        # Nutzen des erweiterten Pydantic-Modells
+        self._llm = llm.with_structured_output(OutputReport)
 
     def run(self, state: ArgusState) -> ArgusState:
-        user_input = state["user_input"]
+        input_type = state.get("input_type", "unknown")
+        findings_text = _format_findings_for_llm(state)
 
-        system_prompt = """Du bist der InputAgent (Triage) von OSINT-Argus.
-Deine Aufgabe ist es, den rohen Benutzer-Input zu analysieren und strukturierte Angriffsziele (Targets) zu extrahieren.
+        prompt_input = (
+            f"Eingabetyp des Systems: {input_type}\n\n"
+            f"=== ALLE AGENTEN FINDINGS ===\n{findings_text}\n\n"
+            f"Erstelle den finalen Risikobericht inklusive Vorbeugung und Incident-Response-Schritten."
+        )
 
-1. Bestimme den globalen Typ des Inputs. Nutze strikt einen dieser Werte: 'domain', 'email', 'text', 'phone', 'file', 'identity', 'unknown'.
+        try:
+            report: OutputReport = self._llm.invoke([
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": prompt_input},
+            ])
+        except Exception as e:
+            print(f"⚠️ OutputAgent: Structured output fehlgeschlagen — {e}")
+            # Fallback bei unerwarteten API- oder Parsingfehlern
+            report = OutputReport(
+                threat_score=50,
+                vulnerability_score=50,
+                risk_level="MEDIUM",
+                explanation="Der Bericht konnte aufgrund eines technischen Fehlers nicht generiert werden.",
+                summary="Automatische Berichterstellung fehlgeschlagen.",
+                action_prevent="Interagiere nicht mit den Objekten, bis eine manuelle Prüfung stattfand.",
+                action_incident_response=["1. System isolieren", "2. IT-Sicherheit kontaktieren"],
+                indicators=["Parsing-Fehler im OutputAgent"]
+            )
 
-2. Extrahiere alle cyber-relevanten Einzel-Targets für die 'to_scan'-Liste des Orchestrators:
-   - IPs, Domains, URLs, E-Mail-Adressen und Telefonnummern.
-   - Software-Zustände (z.B. 'nginx 1.18', 'Apache 2.4').
-   - Krypto-Hashes (MD5, SHA1, SHA256) und vollständige lokale Dateipfade (z.B. 'C:\\Ordner\\datei.pdf' oder '/var/log/syslog').
+        # ── State befüllen ───────────────────────────────────────────────────
+        state["risk_score"] = max(report.threat_score, report.vulnerability_score) 
+        state["risk_level"] = report.risk_level
+        state["summary"] = report.summary
+        state["action_advice"] = f"PRÄVENTION:\n{report.action_prevent}\n\nFALLS BEREITS GEKLICKT:\n" + "\n".join(report.action_incident_response)
 
-WICHTIGE EXTRAKTIONS-REGELN:
-- Extrahiere NUR den nackten, bereinigten Wert der Entität.
-- Füge NIEMALS erklärenden Text, Labels oder Beschreibungen in ein Target ein. 
-  * Falsch: "MD5-Hash (Datei-Indikator)" oder "SHA256: e3b0c4..."
-  * Richtig: "e3b0c4..." (nur der Hash selbst)
-- Wenn der Input eine E-Mail oder ein längerer Text ist, durchsuche den gesamten Text akribisch nach eingebetteten Hashes, IP-Adressen und Dateipfaden und nimm sie alle als separate, isolierte Elemente in die Liste auf."""
+        # Hänge den finalen Report als echtes Findings-Objekt an die Liste an
+        final_finding = Findings(
+            agent=AgentType.ORCHESTRATOR, 
+            input="Zusammenfassung aller Findings",
+            threat_sum=[f"Threat Score: {report.threat_score}", f"Level: {report.risk_level}"],
+            vulnerability_sum=[f"Vulnerability Score: {report.vulnerability_score}"] + report.indicators
+        )
+        state["findings"].append(final_finding)
 
-        # LLM aufrufen
-        extraction: InputExtraction = self.llm.invoke([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Analysiere folgenden Input und extrahiere alle Einzel-Targets sauber:\n\n{user_input}"}
-        ])
+        # ── NEU: Strukturiertes JSON für ChromaDB bauen ──────────────────────
+        # Wir packen alle wichtigen Metadaten direkt in das Dokument, damit 
+        # die Sidebar darauf zugreifen kann.
+        chroma_payload = {
+            "risk_level": report.risk_level,
+            "score": max(report.threat_score, report.vulnerability_score),
+            "summary": report.summary,
+            "indicators": report.indicators,
+            "action_prevent": report.action_prevent,
+            "action_incident_response": report.action_incident_response
+        }
 
-        # State initialisieren und befüllen
-        state["input_type"] = extraction.input_type
-        state["to_scan"] = extraction.extracted_targets
-        state["scanned"] = []
-        state["current_check"] = None
+        # Als JSON-String serialisiert in die ChromaDB wegschreiben
+        save_analysis(
+            query=state.get("user_input", ""),
+            content=json.dumps(chroma_payload, ensure_ascii=False)
+        )
 
-        print(f"\n📥 [InputAgent] Globaler Typ erkannt: {extraction.input_type.upper()}")
-        print(f"🎯 [InputAgent] {len(extraction.extracted_targets)} Targets extrahiert für den Orchestrator:")
-        for target in extraction.extracted_targets:
-            print(f"  → {target}")
+        # ── Ausgabe im Terminal ──────────────────────────────────────────────
+        self._print_custom_report(report)
 
         return state
-</file>
+    
+    def _print_custom_report(self, report: OutputReport) -> None:
+        """Übersichtliche und detaillierte Konsolenausgabe des neuen Reports."""
+        level_icons = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨"}
+        icon = level_icons.get(report.risk_level, "⚪")
 
-<file path="app/models/agent_type.py">
-from enum import Enum
-
-class AgentType(str, Enum):
-    INPUT = "input"
-    ORCHESTRATOR = "orchestrator"
-    DOMAIN = "domain"
-    EMAIL = "email"
-    CVE = "cve"
-    PHONE = "phone"  
-    OUTPUT = "output"
-    FILE = "file"
-    IDENTITY = "identity"
-    LEAK = "leak"
+        print("\n" + "═" * 60)
+        print(f"  {icon}  OSINT-ARGUS FINALER RISIKOBERICHT  {icon}")
+        print("═" * 60)
+        print(f"  Bedrohungs-Score (Threat)      : {report.threat_score}/100")
+        print(f"  Schwachstellen-Score (Vuln)    : {report.vulnerability_score}/100")
+        print(f"  Gesamteinstufung                : [{report.risk_level}]")
+        print("-" * 60)
+        print(f"  Zusammenfassung (Laie):\n  {report.summary}")
+        print("-" * 60)
+        print(f"  🚨 WICHTIG - UNBEDINGT VERMEIDEN:\n  {report.action_prevent}")
+        print("-" * 60)
+        print(f"  🔥 FALLS DU BEREITS GEKLICKT HAST:")
+        for i, step in enumerate(report.action_incident_response, 1):
+            print(f"    {step}")
+        print("-" * 60)
+        print(f"  💡 Haupt-Risikoindikatoren:")
+        for ind in report.indicators:
+            print(f"     • {ind}")
+        print("═" * 60 + "\n")
 </file>
 
 <file path="app/state.py">
@@ -2924,6 +3397,138 @@ class ArgusState(TypedDict):
     current_check: Optional[str]    
     file_paths: List[str]
     file_hashes: List[str]
+</file>
+
+<file path="app/agents/input_agent.py">
+# app/agents/input_agent.py
+import json
+from pydantic import BaseModel, Field
+from typing import Literal, List, Optional
+from app.agents.base_agent import BaseAgent
+from app.state import ArgusState
+from app.models.llm import get_llm
+from app.memory.chroma_memory import get_user_profile, save_user_profile
+
+class InputExtraction(BaseModel):
+    input_type: Literal["domain", "email", "text", "phone", "file", "identity", "unknown"] = Field(
+        description="Der primäre Typ des empfangenen Gesamt-Inputs."
+    )
+    extracted_targets: List[str] = Field(
+        description="Liste aller extrahierten Entitäten, die gescannt werden müssen (E-Mail-Adressen, Domains, IPs, Telefonnummern, Software-Namen, Identitäten, Hashes oder Dateipfade)."
+    )
+
+# NEU: Pydantic Modell für das Text-Profiling (Schritt 2)
+class ProfileUpdate(BaseModel):
+    extracted_vorname: Optional[str] = Field(None, description="In der Mail/Text genannter Vorname des Absenders oder Empfängers (falls erkennbar uns zuzuordnen).")
+    extracted_nachname: Optional[str] = Field(None, description="In der Mail/Text genannter Nachname (z.B. 'Mustermann' aus 'Hallo Herr Mustermann').")
+    extracted_email: Optional[str] = Field(None, description="Die mutmaßliche E-Mail-Adresse des Users, falls im Textkontext als seine identifiziert.")
+    extracted_telefon: Optional[str] = Field(None, description="Die Telefonnummer des Users, falls im Textkontext als seine identifiziert.")
+    kompetenz_level: Literal["LAIE", "GEBILDET", "EXPERTE", "UNVERÄNDERT"] = Field(
+        description="Beweist der Text IT-Fachwissen? 'EXPERTE' bei Begriffen wie SubCAs, RSA, OCSP, etc. 'LAIE' bei trivialem Text."
+    )
+    neue_fachbegriffe: List[str] = Field([], description="Liste neu gefundener IT-Fachbegriffe im Text (z.B. ['OCSP-Responder', 'RSA'])." )
+    begruendung: str = Field(description="Kurze Begründung, warum der User so eingestuft wurde.")
+
+
+class InputAgent(BaseAgent):
+    def __init__(self):
+        self.llm = get_llm().with_structured_output(InputExtraction)
+        # NEU: Separater strukturierter LLM-Aufruf für das Profiling
+        self.profiler_llm = get_llm().with_structured_output(ProfileUpdate)
+
+    def run(self, state: ArgusState) -> ArgusState:
+        user_input = state["user_input"]
+
+        system_prompt = """Du bist der InputAgent (Triage) von OSINT-Argus.
+Deine Aufgabe ist es, den rohen Benutzer-Input zu analysieren und strukturierte Angriffsziele (Targets) zu extrahieren.
+
+1. Bestimme den globalen Typ des Inputs. Nutze strikt einen dieser Werte: 'domain', 'email', 'text', 'phone', 'file', 'identity', 'unknown'.
+
+2. Extrahiere alle cyber-relevanten Einzel-Targets für die 'to_scan'-Liste des Orchestrators:
+   - IPs, Domains, URLs, E-Mail-Adressen und Telefonnummern.
+   - Software-Zustände (z.B. 'nginx 1.18', 'Apache 2.4').
+   - Krypto-Hashes (MD5, SHA1, SHA256) und vollständige lokale Dateipfade (z.B. 'C:\\Ordner\\datei.pdf').
+
+WICHTIGE EXTRAKTIONS-REGELN:
+- Extrahiere NUR den nackten, bereinigten Wert der Entität. No Labels!"""
+
+        # 1. Normale Extraktion ausführen
+        extraction: InputExtraction = self.llm.invoke([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Analysiere folgenden Input und extrahiere alle Einzel-Targets sauber:\n\n{user_input}"}
+        ])
+
+        state["input_type"] = extraction.input_type
+        state["to_scan"] = extraction.extracted_targets
+        state["scanned"] = []
+        state["current_check"] = None
+
+        print(f"\n📥 [InputAgent] Globaler Typ erkannt: {extraction.input_type.upper()}")
+        print(f"🎯 [InputAgent] {len(extraction.extracted_targets)} Targets extrahiert.")
+
+        # ==============================================================================
+        # NEU: LERNENDES NUTZERPROFIL GENERIEREN (SCHRITT 2)
+        # ==============================================================================
+        if extraction.input_type in ["text", "email"] or len(user_input) > 40:
+            print("🧠 [InputAgent] Analysiere Textkontext für Benutzerprofilierung...")
+            
+            # Bestehendes Profil aus ChromaDB laden
+            current_profile = get_user_profile()
+            
+            profiler_prompt = """Du bist ein High-End Profiler für Social Engineering und Operational Security.
+Deine Aufgabe ist es, aus dem eingegebenen Freitext (z.B. einer kopierten Mail) Identitätsmerkmale und das technische Kompetenz-Level des Nutzers zu extrahieren.
+
+Achte penibel auf Anreden: 
+- Wenn dort steht "Hallo Herr Mustermann" oder "Sehr geehrter Herr René Haselbach", extrahiere die Namen.
+- Analysiere das IT-Fachwissen: Werden Fachbegriffe wie 'OCSP', 'SubCAs', 'Drei-Tier-Architektur', 'Zertifikatsfehler' verwendet? Dann ist das Kompetenzlevel EXPERTE.
+- Ist es eine Standard-Spam Mail ohne technisches Zutun des Nutzers, bleibe bei LAIE oder GEBILDET."""
+
+            try:
+                update: ProfileUpdate = self.profiler_llm.invoke([
+                    {"role": "system", "content": profiler_prompt},
+                    {"role": "user", "content": f"Aktuelles Profil: {current_profile}\n\nNeuer Input-Text:\n{user_input}"}
+                ])
+                
+                # Werte intelligent mergen (Überschreiben nur, wenn neue Infos gefunden wurden)
+                if update.extracted_vorname: current_profile["vorname"] = update.extracted_vorname
+                if update.extracted_nachname: current_profile["nachname"] = update.extracted_nachname
+                if update.extracted_email: current_profile["email"] = update.extracted_email
+                if update.extracted_telefon: current_profile["telefon"] = update.extracted_telefon
+                
+                if update.kompetenz_level != "UNVERÄNDERT":
+                    current_profile["kompetenz_level"] = update.kompetenz_level
+                
+                # Fachbegriffe ohne Duplikate anfügen
+                for word in update.neue_fachbegriffe:
+                    if word not in current_profile["fachbegriffe"]:
+                        current_profile["fachbegriffe"].append(word)
+                        
+                current_profile["charakteristik"] = update.begruendung
+                
+                # Zurück in die ChromaDB schreiben
+                save_user_profile(current_profile)
+                print(f"✅ [InputAgent] Profil aktualisiert: {current_profile['vorname']} {current_profile['nachname']} ({current_profile['kompetenz_level']})")
+                
+            except Exception as e:
+                print(f"⚠️ [InputAgent] Profiling fehlgeschlagen: {e}")
+
+        return state
+</file>
+
+<file path="app/models/agent_type.py">
+from enum import Enum
+
+class AgentType(str, Enum):
+    INPUT = "input"
+    ORCHESTRATOR = "orchestrator"
+    DOMAIN = "domain"
+    EMAIL = "email"
+    CVE = "cve"
+    PHONE = "phone"  
+    OUTPUT = "output"
+    FILE = "file"
+    IDENTITY = "identity"
+    LEAK = "leak"
 </file>
 
 <file path="app/agents/orchestrator_agent.py">
@@ -3826,25 +4431,6 @@ MIT — see `LICENSE` for details.
 *OSINT-Argus is an academic project developed as part of an Agentic AI course. It is intended for educational and defensive security research purposes only.*
 </file>
 
-<file path="requirements.txt">
-langgraph
-langchain
-langchain-core
-langchain-community
-langchain-openai
-chromadb
-python-dotenv
-python-whois
-dnspython
-pydantic
-certifi
-httpx
-phonenumbers
-pypdf
-pyexiftool
-streamlit
-</file>
-
 <file path="app/graph.py">
 from langgraph.graph import StateGraph, END
 from app.agents.cve_agent import CVEAgent
@@ -3909,6 +4495,25 @@ builder.add_edge("file", "orchestrator")
 builder.add_edge("identity", "orchestrator")
 
 graph = builder.compile()
+</file>
+
+<file path="requirements.txt">
+langgraph
+langchain
+langchain-core
+langchain-community
+langchain-openai
+chromadb
+python-dotenv
+python-whois
+dnspython
+pydantic
+certifi
+httpx
+phonenumbers
+pypdf
+pyexiftool
+streamlit
 </file>
 
 <file path="app/models/router.py">
@@ -4027,6 +4632,12 @@ class OutputReport(BaseModel):
         description="Die wichtigsten Risikoindikatoren als kurze Stichpunkte (max 10)",
         max_length=10
     )
+
+class ExecutiveSummary(BaseModel):
+    headline: str = Field(description="Eine knackige, alarmierende oder beruhigende Punchline (max. 1 Satz)")
+    digital_footprint_summary: str = Field(description="Zusammenfassung der gefundenen digitalen Identität und deren Sichtbarkeit")
+    primary_threat_vector: str = Field(description="Der gefährlichste Angriffsvektor (z.B. Kombination aus GitHub-Stack und geleaktem Passwort)")
+    action_items: list[str] = Field(description="Die 3 wichtigsten, priorisierten Handlungsschritte für das Target")
 </file>
 
 </files>
