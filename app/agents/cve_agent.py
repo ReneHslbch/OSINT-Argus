@@ -9,30 +9,14 @@ from app.models.llm import get_llm
 from app.models.findings import Findings
 from app.models.agent_type import AgentType
 from app.tools.cve_tools import CVE_TOOLS
+from app.prompts import CVE_AGENT_SYSTEM_PROMPT
 
 llm = get_llm()
-
-SYSTEM_PROMPT_CVE = """Du bist der CVEAgent von OSINT-Argus.
-Deine Aufgabe ist es, Technologie-Stacks, Softwarenamen und Versionsnummern auf bekannte Schwachstellen (CVEs) zu prüfen.
-
-Verwende das Tool 'search_nvd_cves', um die übergebene Technologie ('current_check') in der Schwachstellendatenbank zu recherchieren.
-
-Analysiere die Testergebnisse:
-- Welche Schwachstellen sind kritisch (CVSS Score >= 7.0)?
-- Welche Auswirkungen (z. B. Remote Code Execution, Denial of Service) drohen dem Host?
-
-Erstelle am Ende ein JSON-Objekt mit exakt dieser Struktur:
-{{
-  "threat_indicators": ["Konkrete Angriffsvektoren oder Exploits, die für diese CVEs bekannt sind"],
-  "exposure_findings": ["Liste der gefundenen CVE-IDs mit CVSS-Score und Schweregrad"],
-  "summary": "1-2 Sätze technische Zusammenfassung des Technologierisikos auf Deutsch."
-}}
-Antworte AUSSCHLIESSLICH mit dem validen JSON-Objekt."""
 
 class CVEAgent(BaseAgent):
     def __init__(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT_CVE),
+            ("system", CVE_AGENT_SYSTEM_PROMPT),
             ("human", "Analysierte diese Technologie-Komponente: {input}"),
             ("placeholder", "{agent_scratchpad}"),
         ])
@@ -49,10 +33,9 @@ class CVEAgent(BaseAgent):
         target = state.get("current_check")
 
         if not target:
-            print("⚠️ CVEAgent: Kein Technologie-Target (current_check) zugewiesen.")
-            return state
+            print("[WARN] CVEAgent: Kein Technologie-Target (current_check) zugewiesen.")
 
-        print(f"\n🔍 [CVEAgent] Starte NVD-Abfrage für: '{target}'...")
+        print(f"\n[CVE] Starte NVD-Abfrage fur: '{target}'...")
         
         t0 = time.time()
         result = self._executor.invoke({"input": target})

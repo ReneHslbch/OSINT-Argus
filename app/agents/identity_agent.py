@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from typing import List, Literal
 
 from app.tools.identity_tools import check_email_with_holehe, search_username_with_sherlock
+from app.prompts import IDENTITY_AGENT_SYSTEM_PROMPT
 
 # Pydantic-Schema für die unvorhersehbare, freie Analyse der KI
 class IdentityAnalysis(BaseModel):
@@ -26,7 +27,7 @@ class IdentityAgent(BaseAgent):
         if not target:
             return state
 
-        print(f"\n👤 [IdentityAgent] Analysiere digitale Identität für Target: '{target}'")
+        print(f"\n[IDENT] Analysiere digitale Identitat fur Target: '{target}'")
 
         # --- REIN NICHT-DETERMINISTISCHE TOOL-AUSWAHL ---
         # Das LLM entscheidet selbstständig anhand des Inputs, welche Tools gefüttert werden!
@@ -53,17 +54,7 @@ class IdentityAgent(BaseAgent):
         analysis: IdentityAnalysis = self.llm.invoke([
             {
                 "role": "system",
-                "content": """
-Du bist ein psychologischer Profiler und OSINT-Spezialist für Social Engineering.
-Analysiere die zurückgelieferten OSINT-Rohdaten einer Person (Sherlock/Holehe).
-
-Bewerte das Spear-Phishing-Potenzial:
-- Welche Accounts machen die Person angreifbar? (z.B. GitHub verrät Tech-Stack, LinkedIn verrät Firmenrolle)
-- Gibt es eine Korrelation zwischen den Plattformen?
-- Welche Betreffzeilen (Pretexte) könnte ein Angreifer bei dieser Person erfolgreich nutzen?
-
-Achtung: Antworte streng objektiv auf Basis der Daten.
-"""
+                "content": IDENTITY_AGENT_SYSTEM_PROMPT
             },
             {
                 "role": "user",
@@ -86,8 +77,8 @@ Ermittelte OSINT-Rohdaten:
             )
         )
 
-        print(f"👤 [IdentityAgent] {target} abgeschlossen.")
-        print(f"⚠️ Profil-Risiko: {analysis.risk_assessment}")
-        print(f"🧠 {analysis.reasoning}")
+        print(f"[IDENT] {target} abgeschlossen.")
+        print(f"[WARN] Profil-Risiko: {analysis.risk_assessment}")
+        print(f"[INFO] {analysis.reasoning}")
 
         return state

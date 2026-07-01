@@ -9,33 +9,14 @@ from app.models.llm import get_llm
 from app.models.findings import Findings
 from app.models.agent_type import AgentType
 from app.tools.phone_tools import PHONE_TOOLS
+from app.prompts import PHONE_AGENT_SYSTEM_PROMPT
 
 llm = get_llm()
-
-SYSTEM_PROMPT_PHONE = """Du bist der PhoneAgent von OSINT-Argus, spezialisiert auf Telekommunikations-Forensik und die Analyse von Vishing/Smishing-Angriffsvektoren.
-
-Deine Aufgabe ist es, die übergebene Telefonnummer ('current_check') detailliert zu untersuchen.
-
-Gehe methodisch vor:
-1. Nutze 'parse_and_validate_phone', um die Struktur zu prüfen, die valide E.164-Form zu erhalten und den Leitungstyp (z. B. VOIP, MOBILE) zu ermitteln.
-2. Nutze 'check_phone_reputation' mit der formatierten E.164-Nummer, um Spam-Verzeichnisse und bekannte Smishing-Kampagnen abzufragen.
-
-Kritische Risiko-Vektoren, auf die du achten musst:
-- Leitungstyp 'VOIP': Wird extrem häufig für anonyme Call-Id-Spoofing-Angriffe genutzt.
-- Hoher Spam-Score oder Berichte über Paketdienst-Scams (SMS-Phishing).
-
-Erstelle am Ende ein JSON-Objekt mit exakt dieser Struktur:
-{{
-  "threat_indicators": ["Konkrete Anzeichen für Betrug, Missbrauch, unübliche Ländertypen oder hohe Spam-Meldungen"],
-  "exposure_findings": ["Technische Strukturmerkmale wie falsches Format, Provider-Details, Leitungstyp (VOIP/MOBILE)"],
-  "summary": "1-2 Sätze prägnante cyber-forensische Gesamtbewertung der Telefonnummer auf Deutsch."
-}}
-Antworte AUSSCHLIESSLICH mit dem validen JSON-Objekt."""
 
 class PhoneAgent(BaseAgent):
     def __init__(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT_PHONE),
+            ("system", PHONE_AGENT_SYSTEM_PROMPT),
             ("human", "Analysiere diese Telefonnummer: {input}"),
             ("placeholder", "{agent_scratchpad}"),
         ])
@@ -52,10 +33,9 @@ class PhoneAgent(BaseAgent):
         target = state.get("current_check")
 
         if not target:
-            print("⚠️ PhoneAgent: Kein Telefon-Target (current_check) zugewiesen.")
-            return state
+            print("[WARN] PhoneAgent: Kein Telefon-Target (current_check) zugewiesen.")
 
-        print(f"\n📞 [PhoneAgent] Analysiere Rufnummer: '{target}'...")
+        print(f"\n[PHONE] Analysiere Rufnummer: '{target}'...")
         
         t0 = time.time()
         result = self._executor.invoke({"input": target})
