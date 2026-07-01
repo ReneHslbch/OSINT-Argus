@@ -1,4 +1,5 @@
 import json
+import time
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 
@@ -44,13 +45,12 @@ class DomainAgent(BaseAgent):
         self._executor = AgentExecutor(
             agent=agent,
             tools=DOMAIN_TOOLS,
-            verbose=True,
-            max_iterations=8,  # Etwas mehr Iterationen, da wir viele Tools haben
+            verbose=False,
+            max_iterations=6,
             return_intermediate_steps=True
         )
 
     def run(self, state: ArgusState) -> ArgusState:
-        # Hole das aktuelle Target vom Orchestrator
         target = state.get("current_check")
         
         if not target:
@@ -58,9 +58,13 @@ class DomainAgent(BaseAgent):
             return state
 
         print(f"\n🌐 [DomainAgent] Starte OSINT-Reconnaissance für: {target}...")
-
-        # Führe die Agent-Chain aus
+        
+        t0 = time.time()
         result = self._executor.invoke({"input": target})
+        elapsed_ms = (time.time() - t0) * 1000
+        
+        iteration_count = result.get("intermediate_steps", [])
+        print(f"   ↳ DomainAgent abgeschlossen in {elapsed_ms:.0f}ms ({len(iteration_count)} Tool-Aufrufe)")
         llm_output = result.get("output", "").strip()
 
         # Robustes JSON Parsing der LLM-Ausgabe

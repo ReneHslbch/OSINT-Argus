@@ -1,3 +1,5 @@
+import time
+from typing import Any, Callable
 from langgraph.graph import StateGraph, END
 from app.agents.cve_agent import CVEAgent
 from app.agents.file_agent import FileAgent
@@ -20,18 +22,38 @@ phone_agent = PhoneAgent()
 file_agent = FileAgent()
 identity_agent = IdentityAgent()
 
+def timing_wrapper(node_name: str, run_func: Callable) -> Callable:
+    """Wrapper der Zeitmessung für jeden Graph-Knoten durchführt."""
+    def timed_run(state: ArgusState) -> ArgusState:
+        start = time.time()
+        result = run_func(state)
+        duration_ms = (time.time() - start) * 1000
+        
+        if "node_timings" not in result:
+            result["node_timings"] = {}
+        if node_name not in result["node_timings"]:
+            result["node_timings"][node_name] = []
+        
+        target = state.get("current_check") or ""
+        result["node_timings"][node_name].append({
+            "target": target,
+            "duration_ms": duration_ms
+        })
+        return result
+    return timed_run
+
 builder = StateGraph(ArgusState)
 
-# ── Nodes ──────────────────────────────────────────────────────────────────
-builder.add_node("orchestrator", orchestrator.run)
-builder.add_node("domain",       domain_agent.run)
-builder.add_node("email",        email_agent.run)
-builder.add_node("output",        output_agent.run)
-builder.add_node("cve", cve_agent.run)
-builder.add_node("file", file_agent.run)
-builder.add_node ("input", input_agent.run)
-builder.add_node("phone", phone_agent.run)
-builder.add_node("identity", identity_agent.run)
+# ── Nodes mit Timing-Wrapper ────────────────────────────────────────────────
+builder.add_node("orchestrator", timing_wrapper("orchestrator", orchestrator.run))
+builder.add_node("domain",       timing_wrapper("domain", domain_agent.run))
+builder.add_node("email",        timing_wrapper("email", email_agent.run))
+builder.add_node("output",       timing_wrapper("output", output_agent.run))
+builder.add_node("cve",          timing_wrapper("cve", cve_agent.run))
+builder.add_node("file",         timing_wrapper("file", file_agent.run))
+builder.add_node("input",        timing_wrapper("input", input_agent.run))
+builder.add_node("phone",        timing_wrapper("phone", phone_agent.run))
+builder.add_node("identity",     timing_wrapper("identity", identity_agent.run))
 # ── Entry ──────────────────────────────────────────────────────────────────
 builder.set_entry_point("input")
 
@@ -61,3 +83,4 @@ builder.add_edge("file", "orchestrator")
 builder.add_edge("identity", "orchestrator")
 
 graph = builder.compile()
+graph_async = builder.compile()

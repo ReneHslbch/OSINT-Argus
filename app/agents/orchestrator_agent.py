@@ -4,6 +4,13 @@ from app.state import ArgusState
 from app.models.llm import get_llm
 from app.models.findings import Findings
 from app.models.agent_type import AgentType
+from app.tools.classifier import classify_input
+
+AGENT_MAPPING = {
+    "email": "email",
+    "domain": "domain",
+    "unknown": None,
+}
 
 class OrchestratorAgent(BaseAgent):
 
@@ -39,7 +46,34 @@ class OrchestratorAgent(BaseAgent):
             state["current_check"] = None
             return state
 
-        # Überarbeiteter, präziser Prompt:
+        current_target = remaining[0] if remaining else state["to_scan"][0] if state["to_scan"] else None
+        
+        if current_target:
+            classification = classify_input(current_target)
+            mapped_agent = AGENT_MAPPING.get(classification)
+            
+            if mapped_agent:
+                state["next_agent"] = mapped_agent
+                state["current_check"] = current_target
+                
+                new_queue = list(remaining)
+                if current_target in new_queue:
+                    new_queue.remove(current_target)
+                state["to_scan"] = new_queue
+                
+                print(f"\n🧠 [Orchestrator Regex] Klassifikation: {classification} → Route zu: → {mapped_agent} | Target: '{current_target}'")
+                print(f"   ↳ Queue-Größe: {len(state['to_scan'])} verbleibende Targets.")
+                
+                log_finding = Findings(
+                    agent=AgentType.ORCHESTRATOR,
+                    input=current_target,
+                    threat_sum=[f"Routing (Regex) -> {mapped_agent}"],
+                    vulnerability_sum=[f"Deterministisches Routing via Regex-Klassifikation: {classification}"]
+                )
+                state["findings"].append(log_finding)
+                
+                return state
+
         system_prompt = """Du bist der zentrale Orchestrator von OSINT-Argus.
 Deine Aufgabe ist es, die Liste der Targets ('to_scan') ADAPTIV und INTELLIGENT abzuarbeiten.
 Priorisiere nach Risiko und leite die Targets an die richtigen Spezialagenten weiter.
@@ -86,7 +120,7 @@ STRATEGISCHE QUEUE-REGELN:
         state["to_scan"] = new_queue
         self._log_decision(state, decision)
 
-        print(f"\n🧠 [Orchestrator KI] Route zu: → {decision.next_agent} | Target: '{decision.current_check}'")
+        print(f"\n🧠 [Orchestrator LLM] Route zu: → {decision.next_agent} | Target: '{decision.current_check}'")
         print(f"   ↳ Begründung: {decision.reasoning}")
         print(f"   ↳ Queue-Größe angepasst auf: {len(state['to_scan'])} verbleibende Targets.")
 
