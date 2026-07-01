@@ -9,6 +9,7 @@ from app.tools.file_tools import (
     extract_universell_document_metadata,
     check_file_hash_virustotal,
 )
+from app.prompts import FILE_AGENT_SYSTEM_PROMPT
 
 class FileAgent(BaseAgent):
 
@@ -53,31 +54,7 @@ class FileAgent(BaseAgent):
         analysis: FileAnalysis = self.llm.invoke([
             {
                 "role": "system",
-                "content": """
-Du bist ein erfahrener Malware-Analyst und OSINT-Experte.
-
-Analysiere Dateimetadaten und VirusTotal-Ergebnisse.
-
-Achte besonders auf:
-- Personenbezug
-- Autoren
-- Benutzernamen
-- Firmennamen
-- interne Hostnamen
-- interne Netzwerkinformationen
-- UNC-Pfade
-- Sharepoint Hinweise
-- Build-Systeme
-- Entwicklungsumgebungen
-- Office-Metadaten
-- PDF-Metadaten
-- Malware-Indikatoren
-- verdächtige Dateieigenschaften
-
-Bewerte ausschließlich auf Basis der vorliegenden Daten.
-
-Wenn keine Hinweise vorliegen, liefere leere Listen zurück.
-"""
+                "content": FILE_AGENT_SYSTEM_PROMPT
             },
             {
                 "role": "user",
@@ -108,11 +85,11 @@ VirusTotal-Ergebnisse:
             for identity in analysis.extracted_identities:
                 if identity not in state["to_scan"]:
                     state["to_scan"].append(identity)
-                    print(f"🎯 [FileAgent] Neues Identitäts-Target entdeckt und registriert: {identity}")
-                    
-        print(f"\n📄 [FileAgent] {clean_path}")
-        print(f"⚠️ Risiko: {analysis.risk_level}")
-        print(f"🧠 {analysis.reasoning}")
+                    print(f"[FILE] Neues Identitats-Target entdeckt und registriert: {identity}")
+            
+        print(f"\n[FILE] {clean_path}")
+        print(f"[WARN] Risiko: {analysis.risk_level}")
+        print(f"[INFO] {analysis.reasoning}")
 
 
         return state

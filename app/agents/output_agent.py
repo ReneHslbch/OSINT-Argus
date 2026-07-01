@@ -7,33 +7,9 @@ from app.models.llm import get_llm
 from app.models.findings import Findings
 from app.models.agent_type import AgentType
 from app.memory.chroma_memory import save_analysis
+from app.prompts import OUTPUT_AGENT_SYSTEM_PROMPT
 
-llm = get_llm()
-
-SYSTEM_PROMPT = """Du bist der OutputAgent von OSINT-Argus. Deine Aufgabe ist es, aus allen gesammelten Agenten-Findings einen finalen, nicht-deterministischen Cybersecurity-Risikobericht zu generieren.
-
-Analysiere die Findings aus zwei Blickwinkeln:
-1. Threat Score (0-100): Gibt es Anzeichen für aktive Angreifer, Phishing-Absichten, Malware (URLhaus) oder böswillige Absichten?
-2. Vulnerability Score (0-100): Gibt es offene Flanken? (Fehlendes SPF/DMARC, abgelaufenes SSL, bekannte Software-CVEs)?
-
-KALIBRIERUNGS- UND SCORING-REGELN (Score-Sensitivität reduzieren):
-- EXPLIZITE SCORE-ANKER: Fehlende DNS-Infrastruktur-Records dürfen nicht übergewichtet werden. Ein fehlender SPF-Record erhöht den Vulnerability Score um maximal +15 Punkte (nicht +50). Ein fehlender DMARC-Record erhöht den Vulnerability Score um maximal +10 Punkte.
-- FEHLER-NEUTRALITÄT: Tool-Fehler, API-Timeouts und "UNKNOWN"-Verdicts fließen NICHT negativ in die Scores ein und erhöhen die Scores explizit um 0 Punkte. Sie sind vollkommen neutral zu behandeln.
-- HARTE CRITICAL-ANFORDERUNG: Das risk_level 'CRITICAL' erfordert zwingend mindestens einen aktiven Malware- oder Phishing-Befund (z. B. aus URLhaus, VirusTotal mit Malicious Hits > 0, oder einer verifizierten Phishing-Blacklist) — fehlende Records oder reine Konfigurationsfehler alleine reichen für CRITICAL nicht aus (hier maximal MEDIUM oder HIGH vergeben).
-
-Leite daraus das risk_level ab:
-- LOW (Scores vorwiegend < 33)
-- MEDIUM (Scores vorwiegend 34-66)
-- HIGH (Scores vorwiegend 67-84)
-- CRITICAL (Scores vorwiegend 85-100 UND zwingend ein akuter, aktiver Phishing/Malware-Befund vorhanden)
-
-WICHTIG FÜR DIE HANDLUNGSANWEISUNGEN:
-- Formuliere in 'action_prevent' eine klare Warnung, was auf KEINEN Fall getan werden darf (z.B. 'Nicht auf Links klicken, da...').
-- Erstelle in 'action_incident_response' eine klare, chronologische 1., 2., 3.-Schritt-Anleitung für den Fall, DASS der Nutzer bereits auf den Link geklickt, die Datei geöffnet oder mit dem Absender interagiert hat.
-
-Regeln:
-- Nutze nur explizit beobachtete Fakten aus den Findings. Erfinde nichts.
-"""
+llm = get_llm().with_config(request_timeout=60)
 def _format_findings_for_llm(state: ArgusState) -> str:
     """Extrahiert Daten direkt aus den Attributen der neuen Findings-Dataclass."""
     if not state.get("findings"):
@@ -71,11 +47,11 @@ class OutputAgent(BaseAgent):
 
         try:
             report: OutputReport = self._llm.invoke([
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": OUTPUT_AGENT_SYSTEM_PROMPT},
                 {"role": "user",   "content": prompt_input},
             ])
         except Exception as e:
-            print(f"⚠️ OutputAgent: Structured output fehlgeschlagen — {e}")
+            print(f"[WARN] OutputAgent: Structured output fehlgeschlagen - {e}")
             # Fallback bei unerwarteten API- oder Parsingfehlern
             report = OutputReport(
                 threat_score=50,
@@ -127,27 +103,27 @@ class OutputAgent(BaseAgent):
         return state
     
     def _print_custom_report(self, report: OutputReport) -> None:
-        """Übersichtliche und detaillierte Konsolenausgabe des neuen Reports."""
-        level_icons = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🚨"}
-        icon = level_icons.get(report.risk_level, "⚪")
+        """Ubersichtliche und detaillierte Konsolenausgabe des neuen Reports."""
+        level_icons = {"LOW": "[LOW]", "MEDIUM": "[MED]", "HIGH": "[HIGH]", "CRITICAL": "[CRIT]"}
+        icon = level_icons.get(report.risk_level, "[???]")
 
-        print("\n" + "═" * 60)
+        print("\n" + "=" * 60)
         print(f"  {icon}  OSINT-ARGUS FINALER RISIKOBERICHT  {icon}")
-        print("═" * 60)
+        print("=" * 60)
         print(f"  Bedrohungs-Score (Threat)      : {report.threat_score}/100")
         print(f"  Schwachstellen-Score (Vuln)    : {report.vulnerability_score}/100")
         print(f"  Gesamteinstufung                : [{report.risk_level}]")
         print("-" * 60)
         print(f"  Zusammenfassung (Laie):\n  {report.summary}")
         print("-" * 60)
-        print(f"  🚨 WICHTIG - UNBEDINGT VERMEIDEN:\n  {report.action_prevent}")
+        print(f"  [WARN] WICHTIG - UNBEDINGT VERMEIDEN:\n  {report.action_prevent}")
         print("-" * 60)
-        print(f"  🔥 FALLS DU BEREITS GEKLICKT HAST:")
+        print(f"  [ALERT] FALLS DU BEREITS GEKLICKT HAST:")
         for i, step in enumerate(report.action_incident_response, 1):
             print(f"    {step}")
         print("-" * 60)
-        print(f"  💡 Haupt-Risikoindikatoren:")
+        print(f"  [INFO] Haupt-Risikoindikatoren:")
         for ind in report.indicators:
-            print(f"     • {ind}")
-        print("═" * 60 + "\n")
+            print(f"     - {ind}")
+        print("=" * 60 + "\n")
         

@@ -5,6 +5,7 @@ from app.models.llm import get_llm
 from app.models.findings import Findings
 from app.models.agent_type import AgentType
 from app.tools.classifier import classify_input
+from app.prompts import ORCHESTRATOR_SYSTEM_PROMPT
 
 AGENT_MAPPING = {
     "email": "email",
@@ -61,8 +62,8 @@ class OrchestratorAgent(BaseAgent):
                     new_queue.remove(current_target)
                 state["to_scan"] = new_queue
                 
-                print(f"\n🧠 [Orchestrator Regex] Klassifikation: {classification} → Route zu: → {mapped_agent} | Target: '{current_target}'")
-                print(f"   ↳ Queue-Größe: {len(state['to_scan'])} verbleibende Targets.")
+                print(f"\n[ORCH] Klassifikation: {classification} -> Route zu: {mapped_agent} | Target: '{current_target}'")
+                print(f"   Queue-GrOBe: {len(state['to_scan'])} verbleibende Targets.")
                 
                 log_finding = Findings(
                     agent=AgentType.ORCHESTRATOR,
@@ -74,25 +75,6 @@ class OrchestratorAgent(BaseAgent):
                 
                 return state
 
-        system_prompt = """Du bist der zentrale Orchestrator von OSINT-Argus.
-Deine Aufgabe ist es, die Liste der Targets ('to_scan') ADAPTIV und INTELLIGENT abzuarbeiten.
-Priorisiere nach Risiko und leite die Targets an die richtigen Spezialagenten weiter.
-
-VERFÜGBARE AGENTEN & ZIEL-ZUORDNUNG:
-- 'domain': Für Domainnamen, URLs oder IP-Adressen.
-- 'email': Für E-Mail-Adressen.
-- 'cve': Für Software-Technologien und Versionen (z.B. 'nginx 1.18.0').
-- 'phone': Für Handy-/Telefonnummern.
-- 'file': Für lokale Dateipfade, Dokumente, PDFs sowie Datei-Hashes (MD5, SHA256).
-- 'identity': Für extrahierte Klarnamen von Personen (z.B. 'Rene Haselbach'), Usernames oder Social-Media-Handles.
-- 'output': Für den finalen Bericht (wenn die Queue leer ist oder adaptiv abgebrochen wird).
-
-STRATEGISCHE QUEUE-REGELN:
-1. Wenn ein vorheriger Agent ein neues Target (wie z.B. einen Autorennahmen aus einer PDF) in die Target-Liste gelegt hat, musst du diesen zwingend beachten!
-2. Ein Personenname ist KEIN Müll. Setze ihn als 'current_check' und übergebe ihn an den 'identity'-Agenten.
-3. Behalte alle anderen noch nicht gescannten Targets unbedingt in der Liste 'relevant_targets_remaining' bei!
-"""
-        
         user_content = f"""
         Gesamt-Input-Typ: {state.get('input_type')}
         Aktuelle Target-Liste (to_scan): {state['to_scan']}
@@ -106,7 +88,7 @@ STRATEGISCHE QUEUE-REGELN:
         """
 
         decision: OrchestratorDecision = self.llm.invoke([
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": ORCHESTRATOR_SYSTEM_PROMPT},
             {"role": "user", "content": user_content}
         ])
 
@@ -120,9 +102,9 @@ STRATEGISCHE QUEUE-REGELN:
         state["to_scan"] = new_queue
         self._log_decision(state, decision)
 
-        print(f"\n🧠 [Orchestrator LLM] Route zu: → {decision.next_agent} | Target: '{decision.current_check}'")
-        print(f"   ↳ Begründung: {decision.reasoning}")
-        print(f"   ↳ Queue-Größe angepasst auf: {len(state['to_scan'])} verbleibende Targets.")
+        print(f"\n[ORCH] Route zu: {decision.next_agent} | Target: '{decision.current_check}'")
+        print(f"   Begrundung: {decision.reasoning}")
+        print(f"   Queue-GrOBe angepasst auf: {len(state['to_scan'])} verbleibende Targets.")
 
         return state
 

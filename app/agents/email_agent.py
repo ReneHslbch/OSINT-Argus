@@ -8,35 +8,14 @@ from app.models.llm import get_llm
 from app.models.findings import Findings
 from app.models.agent_type import AgentType
 from app.tools.email_tools import EMAIL_TOOLS
+from app.prompts import EMAIL_AGENT_SYSTEM_PROMPT
 
 llm = get_llm()
-
-SYSTEM_PROMPT_EMAIL = """Du bist der EmailAgent von OSINT-Argus, spezialisiert auf die Erkennung von Social Engineering und technischem Betrug.
-
-Deine Aufgabe ist es, das zugewiesene Target ('current_check') tiefenanalytisch zu prüfen.
-
-FALL 1: Das Target ist eine E-Mail-Adresse oder reine Domain:
-- Nutze 'check_virustotal_email_domain' und 'check_phishing_blacklist', um die technische Reputation zu ermitteln.
-
-FALL 2: Das Target ist ein E-Mail-Inhalt / Textkörper (Message Content):
-- Analysiere den Text direkt (ohne Tools) auf Phishing-Muster. Du musst den Text auf folgende 4 linguistische Vektoren prüfen:
-  1. Authority & Scarcity (Erzeugt der Text künstlichen Zeitdruck, Angst vor Kontosperrung oder droht mit Konsequenzen?)
-  2. Impersonation-Qualität (Wie gut imitiert der Text ein echtes Unternehmen? Gibt es Widersprüche zwischen dem Inhalt und bekannten Markenstandards?)
-  3. Call-to-Action Anomalien (Werden sensible Daten verlangt oder soll der Nutzer unüberlegt auf Links/Anhänge klicken?)
-  4. Technische Artefakte (Gibt es fehlerhafte Zeichenkodierungen wie '???', auffällige Grammatikfehler oder Übersetzungs-Glitches?)
-
-Erstelle am Ende ein JSON-Objekt mit exakt dieser Struktur:
-{{
-  "threat_indicators": ["Konkrete textuelle, psychologische oder inhaltliche Phishing-Indikatoren"],
-  "exposure_findings": ["Technische Funde, z.B. Blacklist-Einträge, VT-Reputation oder kritische Header-Mismatches"],
-  "summary": "Prägnante, 2-3 Sätze lange cyber-forensische Gesamtbewertung des Inhalts auf Deutsch."
-}}
-Antworte AUSSCHLIESSLICH mit dem validen JSON-Objekt. Verwende kein Markdown um das JSON herum, außer den reinen Text."""
 
 class EmailAgent(BaseAgent):
     def __init__(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT_EMAIL),
+            ("system", EMAIL_AGENT_SYSTEM_PROMPT),
             ("human", "Analysiere dieses spezifische Target: {input}"),
             ("placeholder", "{agent_scratchpad}"),
         ])
@@ -53,13 +32,12 @@ class EmailAgent(BaseAgent):
         target = state.get("current_check")
 
         if not target:
-            print("⚠️ EmailAgent: Kein Target (current_check) zugewiesen.")
-            return state
+            print("[WARN] EmailAgent: Kein Target (current_check) zugewiesen.")
 
         if len(target) > 150:
-            print(f"\n📬 [EmailAgent] Analysiere E-Mail-Textinhalt ({len(target)} Zeichen)...")
+            print(f"\n[EMAIL] Analysiere E-Mail-Textinhalt ({len(target)} Zeichen)...")
         else:
-            print(f"\n📬 [EmailAgent] Analysiere E-Mail-Strukturelement: '{target}'...")
+            print(f"\n[EMAIL] Analysiere E-Mail-Strukturelement: '{target}'...")
         
         t0 = time.time()
         result = self._executor.invoke({"input": target})

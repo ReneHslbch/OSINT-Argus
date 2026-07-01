@@ -6,6 +6,7 @@ from app.agents.base_agent import BaseAgent
 from app.state import ArgusState
 from app.models.llm import get_llm
 from app.memory.chroma_memory import get_user_profile, save_user_profile
+from app.prompts import INPUT_AGENT_SYSTEM_PROMPT, INPUT_AGENT_PROFILER_PROMPT
 
 class InputExtraction(BaseModel):
     input_type: Literal["domain", "email", "text", "phone", "file", "identity", "unknown"] = Field(
@@ -37,22 +38,9 @@ class InputAgent(BaseAgent):
     def run(self, state: ArgusState) -> ArgusState:
         user_input = state["user_input"]
 
-        system_prompt = """Du bist der InputAgent (Triage) von OSINT-Argus.
-Deine Aufgabe ist es, den rohen Benutzer-Input zu analysieren und strukturierte Angriffsziele (Targets) zu extrahieren.
-
-1. Bestimme den globalen Typ des Inputs. Nutze strikt einen dieser Werte: 'domain', 'email', 'text', 'phone', 'file', 'identity', 'unknown'.
-
-2. Extrahiere alle cyber-relevanten Einzel-Targets für die 'to_scan'-Liste des Orchestrators:
-   - IPs, Domains, URLs, E-Mail-Adressen und Telefonnummern.
-   - Software-Zustände (z.B. 'nginx 1.18', 'Apache 2.4').
-   - Krypto-Hashes (MD5, SHA1, SHA256) und vollständige lokale Dateipfade (z.B. 'C:\\Ordner\\datei.pdf').
-
-WICHTIGE EXTRAKTIONS-REGELN:
-- Extrahiere NUR den nackten, bereinigten Wert der Entität. No Labels!"""
-
-        # 1. Normale Extraktion ausführen
+        # 1. Normale Extraktion ausfuhren
         extraction: InputExtraction = self.llm.invoke([
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": INPUT_AGENT_SYSTEM_PROMPT},
             {"role": "user", "content": f"Analysiere folgenden Input und extrahiere alle Einzel-Targets sauber:\n\n{user_input}"}
         ])
 
@@ -61,29 +49,21 @@ WICHTIGE EXTRAKTIONS-REGELN:
         state["scanned"] = []
         state["current_check"] = None
 
-        print(f"\n📥 [InputAgent] Globaler Typ erkannt: {extraction.input_type.upper()}")
-        print(f"🎯 [InputAgent] {len(extraction.extracted_targets)} Targets extrahiert.")
+        print(f"\n[INPUT] Globaler Typ erkannt: {extraction.input_type.upper()}")
+        print(f"[INPUT] {len(extraction.extracted_targets)} Targets extrahiert.")
 
         # ==============================================================================
         # NEU: LERNENDES NUTZERPROFIL GENERIEREN (SCHRITT 2)
         # ==============================================================================
         if extraction.input_type in ["text", "email"] or len(user_input) > 40:
-            print("🧠 [InputAgent] Analysiere Textkontext für Benutzerprofilierung...")
+            print("[INPUT] Analysiere Textkontext fur Benutzerprofilierung...")
             
             # Bestehendes Profil aus ChromaDB laden
             current_profile = get_user_profile()
             
-            profiler_prompt = """Du bist ein High-End Profiler für Social Engineering und Operational Security.
-Deine Aufgabe ist es, aus dem eingegebenen Freitext (z.B. einer kopierten Mail) Identitätsmerkmale und das technische Kompetenz-Level des Nutzers zu extrahieren.
-
-Achte penibel auf Anreden: 
-- Wenn dort steht "Hallo Herr Mustermann" oder "Sehr geehrter Herr René Haselbach", extrahiere die Namen.
-- Analysiere das IT-Fachwissen: Werden Fachbegriffe wie 'OCSP', 'SubCAs', 'Drei-Tier-Architektur', 'Zertifikatsfehler' verwendet? Dann ist das Kompetenzlevel EXPERTE.
-- Ist es eine Standard-Spam Mail ohne technisches Zutun des Nutzers, bleibe bei LAIE oder GEBILDET."""
-
             try:
                 update: ProfileUpdate = self.profiler_llm.invoke([
-                    {"role": "system", "content": profiler_prompt},
+                    {"role": "system", "content": INPUT_AGENT_PROFILER_PROMPT},
                     {"role": "user", "content": f"Aktuelles Profil: {current_profile}\n\nNeuer Input-Text:\n{user_input}"}
                 ])
                 
@@ -105,9 +85,9 @@ Achte penibel auf Anreden:
                 
                 # Zurück in die ChromaDB schreiben
                 save_user_profile(current_profile)
-                print(f"✅ [InputAgent] Profil aktualisiert: {current_profile['vorname']} {current_profile['nachname']} ({current_profile['kompetenz_level']})")
+                print(f"[INPUT] Profil aktualisiert: {current_profile['vorname']} {current_profile['nachname']} ({current_profile['kompetenz_level']})")
                 
             except Exception as e:
-                print(f"⚠️ [InputAgent] Profiling fehlgeschlagen: {e}")
+                print(f"[WARN] [INPUT] Profiling fehlgeschlagen: {e}")
 
         return state

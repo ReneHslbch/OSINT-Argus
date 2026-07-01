@@ -28,10 +28,9 @@ class LeakAgent(BaseAgent):
         
         # Fall C: Keine E-Mail-Adresse verfügbar
         else:
-            print(f"ℹ️ [LeakAgent] Überspringe Leak-Check. Weder Target noch Profil enthalten eine E-Mail-Adresse.")
-            return state
+            print(f"[INFO] [LEAK] Uberspringe Leak-Check. Weder Target noch Profil enthalten eine E-Mail-Adresse.")
 
-        print(f"🔍 [LeakAgent] Prüfe Datenlecks für: {leak_target} ({source_info})...")
+        print(f"[LEAK] Prufe Datenlecks fur: {leak_target} ({source_info})...")
 
         # 3. Tool aufrufen
         result = check_hibp.invoke({
@@ -62,5 +61,5 @@ class LeakAgent(BaseAgent):
         findings_list.append(finding)
         state["findings"] = findings_list
 
-        print(f"✅ [LeakAgent] Analyse für {leak_target} abgeschlossen. Funde: {len(breaches)}")
+        print(f"[LEAK] Analyse fur {leak_target} abgeschlossen. Funde: {len(breaches)}")
         return state
