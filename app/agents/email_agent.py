@@ -1,6 +1,7 @@
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate
 import json
+import time
 from app.agents.base_agent import BaseAgent
 from app.state import ArgusState
 from app.models.llm import get_llm
@@ -43,8 +44,8 @@ class EmailAgent(BaseAgent):
         self._executor = AgentExecutor(
             agent=agent,
             tools=EMAIL_TOOLS,
-            verbose=True,
-            max_iterations=5,
+            verbose=False,
+            max_iterations=4,
             return_intermediate_steps=True
         )
 
@@ -55,13 +56,17 @@ class EmailAgent(BaseAgent):
             print("⚠️ EmailAgent: Kein Target (current_check) zugewiesen.")
             return state
 
-        # Ein schönes Terminal-Logging, um zu sehen, was er gerade analysiert
         if len(target) > 150:
             print(f"\n📬 [EmailAgent] Analysiere E-Mail-Textinhalt ({len(target)} Zeichen)...")
         else:
             print(f"\n📬 [EmailAgent] Analysiere E-Mail-Strukturelement: '{target}'...")
         
+        t0 = time.time()
         result = self._executor.invoke({"input": target})
+        elapsed_ms = (time.time() - t0) * 1000
+        
+        iteration_count = result.get("intermediate_steps", [])
+        print(f"   ↳ EmailAgent abgeschlossen in {elapsed_ms:.0f}ms ({len(iteration_count)} Tool-Aufrufe)")
         llm_output = result.get("output", "").strip()
 
         # Robustes JSON-Parsing

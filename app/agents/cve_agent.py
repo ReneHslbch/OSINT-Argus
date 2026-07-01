@@ -1,4 +1,5 @@
 import json
+import time
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -39,8 +40,8 @@ class CVEAgent(BaseAgent):
         self._executor = AgentExecutor(
             agent=agent,
             tools=CVE_TOOLS,
-            verbose=True,
-            max_iterations=4,
+            verbose=False,
+            max_iterations=3,
             return_intermediate_steps=True
         )
 
@@ -53,7 +54,12 @@ class CVEAgent(BaseAgent):
 
         print(f"\n🔍 [CVEAgent] Starte NVD-Abfrage für: '{target}'...")
         
+        t0 = time.time()
         result = self._executor.invoke({"input": target})
+        elapsed_ms = (time.time() - t0) * 1000
+        
+        iteration_count = result.get("intermediate_steps", [])
+        print(f"   ↳ CVEAgent abgeschlossen in {elapsed_ms:.0f}ms ({len(iteration_count)} Tool-Aufrufe)")
         llm_output = result.get("output", "").strip()
 
         # Robustes JSON-Parsing
