@@ -15,4 +15,5 @@ class ArgusState(TypedDict, total=False):
     current_check: Optional[str]
     file_paths: List[str]
     file_hashes: List[str]
-    node_timings: Dict[str, List[Dict[str, Any]]]      
+    node_timings: Dict[str, List[Dict[str, Any]]]
+    language: str  # UI + Analysis language: "en" or "de"      

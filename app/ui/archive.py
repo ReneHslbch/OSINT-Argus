@@ -8,6 +8,7 @@ import json
 import streamlit as st
 
 from app.ui.styles import LEVEL_ICON, LEVEL_COLOR, level_badge, score_bar
+from app.ui.strings import t
 
 
 def check_archiv() -> bool:
@@ -17,6 +18,8 @@ def check_archiv() -> bool:
     """
     if "active_report_content" not in st.session_state:
         return False
+    
+    lang = st.session_state.get("ui_language", "en")
 
     st.markdown(
         '<div class="argus-header">'
@@ -26,17 +29,17 @@ def check_archiv() -> bool:
         '</div>',
         unsafe_allow_html=True,
     )
-    st.info("ℹ️ Sie betrachten eine historische Analyse aus der ChromaDB-Vektordatenbank.")
+    st.info(t("archive_info", lang))
 
     try:
         data = json.loads(st.session_state["active_report_content"])
-        _render_archive_body(data)
+        _render_archive_body(data, lang)
     except Exception:
-        st.warning("Das Format dieser alten Analyse ist unstrukturiert. Zeige Rohdaten an:")
-        st.text_area("Report Rohdaten", st.session_state["active_report_content"], height=350)
+        st.warning(t("archive_unstructured", lang))
+        st.text_area(t("label_raw_data", lang), st.session_state["active_report_content"], height=350)
 
     st.markdown("---")
-    if st.button("🔄 Neue Analyse starten", type="primary"):
+    if st.button(t("btn_new_analysis", lang), type="primary"):
         del st.session_state["active_report_content"]
         del st.session_state["active_report_query"]
         st.rerun()
@@ -46,7 +49,7 @@ def check_archiv() -> bool:
 
 # ── private Hilfsfunktion ────────────────────────────────────────────────────
 
-def _render_archive_body(data: dict) -> None:
+def _render_archive_body(data: dict, lang: str) -> None:
     lvl            = data.get("risk_level", "UNKNOWN")
     score          = data.get("score", 0)
     summary        = data.get("summary", "")
@@ -54,12 +57,11 @@ def _render_archive_body(data: dict) -> None:
     prevent_text   = data.get("action_prevent", "")
     incident_steps = data.get("action_incident_response", [])
 
-    # Scores & Badge
     col_ts, col_vs, col_lvl = st.columns([1, 1, 1])
     color_t = LEVEL_COLOR.get(lvl, "#9ca3af")
 
     with col_ts:
-        st.markdown("**Risiko-Score**")
+        st.markdown(t("label_risk_score", lang))
         st.markdown(
             f'<span style="font-size:2.2rem;font-weight:700">{score}</span>'
             f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
@@ -67,23 +69,21 @@ def _render_archive_body(data: dict) -> None:
             unsafe_allow_html=True,
         )
     with col_vs:
-        st.markdown("**Datenquelle**")
+        st.markdown(t("label_data_source", lang))
         st.markdown(
             '<span style="font-size:1.5rem;font-weight:600;display:block;margin-top:8px;">'
             'ChromaDB Persistent</span>',
             unsafe_allow_html=True,
         )
     with col_lvl:
-        st.markdown("**Gesamteinstufung**")
+        st.markdown(t("label_risk_level", lang))
         st.markdown(level_badge(lvl), unsafe_allow_html=True)
 
-    # Zusammenfassung
     if summary:
         st.markdown("---")
         st.markdown("#### Zusammenfassung")
         st.info(summary)
 
-    # Indikatoren
     if indicators:
         st.markdown("#### 💡 Haupt-Risikoindikatoren")
         cols = st.columns(3)
@@ -94,26 +94,25 @@ def _render_archive_body(data: dict) -> None:
             with cols[i % 3]:
                 st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
 
-    # Handlungsempfehlungen
     st.markdown("---")
     st.markdown("#### Handlungsempfehlungen")
     col_p, col_i = st.columns(2)
 
     with col_p:
-        st.markdown("🚫 **Unbedingt vermeiden**")
+        st.markdown(t("header_prevention", lang))
         st.markdown(
             f'<div class="action-box action-prevent">{prevent_text}</div>',
             unsafe_allow_html=True,
         )
     with col_i:
-        st.markdown("🔥 **Falls bereits geklickt**")
+        st.markdown(t("header_incident", lang))
         if incident_steps:
             incident_text = "<br>".join(
                 step if step.startswith(("1.", "2.", "3.", "4.")) else f"{idx + 1}. {step}"
                 for idx, step in enumerate(incident_steps)
             )
         else:
-            incident_text = "Keine spezifischen Incident-Response-Schritte hinterlegt."
+            incident_text = t("msg_no_incident_steps", lang)
         st.markdown(
             f'<div class="action-box action-incident">{incident_text}</div>',
             unsafe_allow_html=True,

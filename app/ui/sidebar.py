@@ -1,6 +1,6 @@
 """
 app/ui/sidebar.py
-Rendert die linke Seitenleiste mit Analyse-Historie aus ChromaDB.
+Rendert die linke Seitenleiste mit Analyse-Historie aus ChromaDB + Sprachselector.
 """
 
 import json
@@ -8,21 +8,36 @@ import streamlit as st
 
 from app.memory.chroma_memory import get_last_analyses
 from app.ui.styles import LEVEL_ICON
+from app.ui.strings import t, get_language_options
 
 
 def render_sidebar() -> None:
     """Seitenleiste mit den letzten 8 Analysen aus der ChromaDB."""
     with st.sidebar:
-        st.markdown("## 👁️ OSINT-Argus")
-        st.caption("Multi-Agent Cybersecurity Analyzer")
+        if "ui_language" not in st.session_state:
+            st.session_state.ui_language = "en"
+        
+        lang_options = get_language_options()
+        lang_labels = [f"{code} - {name}" for code, name in lang_options]
+        selected_idx = st.selectbox(
+            t("label_language", "en"),
+            options=range(len(lang_labels)),
+            format_func=lambda i: lang_labels[i],
+            index=0 if st.session_state.ui_language == "en" else 1,
+            help="Switch UI language (does not affect analysis language)"
+        )
+        st.session_state.ui_language = lang_options[selected_idx][0]
+        
+        st.markdown(t("sidebar_title", st.session_state.ui_language))
+        st.caption(t("header_subtitle", st.session_state.ui_language))
         st.divider()
 
-        st.markdown("**Letzte Analysen (ChromaDB)**")
+        st.markdown(t("sidebar_history", st.session_state.ui_language))
 
         try:
             db_entries = get_last_analyses(limit=8)
         except Exception:
-            st.error("Fehler beim Laden der Historie")
+            st.error(t("msg_history_error", st.session_state.ui_language))
             db_entries = []
 
         if db_entries:
@@ -46,9 +61,7 @@ def render_sidebar() -> None:
                     st.session_state["active_report_content"] = entry["content"]
                     st.rerun()
         else:
-            st.caption("Noch keine Analysen in der Datenbank vorhanden.")
+            st.caption(t("msg_no_history", st.session_state.ui_language))
 
         st.divider()
-        st.caption(
-            "Agents: Input · Orchestrator · Domain · Email · CVE · Phone · File · Identity · Output"
-        )
+        st.caption(t("caption_agents", st.session_state.ui_language))
