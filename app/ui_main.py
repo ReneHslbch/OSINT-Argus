@@ -6,6 +6,7 @@ from app.ui.archive import check_archiv
 from app.ui.leak_tab import render_leak_tab
 from app.ui.results import render_results
 from app.ui.sidebar import render_sidebar
+from app.ui.strings import t
 
 st.set_page_config(
     page_title="OSINT-Argus",
@@ -13,66 +14,65 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-# ── Main ──────────────────────────────────────────────────────────────────────
+
+if "ui_language" not in st.session_state:
+    st.session_state.ui_language = "en"
+
 def main():
     render_sidebar()
 
     if check_archiv(): return
 
+    # Sync analysis language with UI language
+    st.session_state.language = st.session_state.ui_language
+
     st.markdown(
         '<div class="argus-header">'
         '<span style="font-size:2.2rem">👁️</span>'
         '<div><p class="argus-title">OSINT-Argus</p>'
-        '<p class="argus-sub">Multi-Agent Cybersecurity Analyzer</p></div>'
+        f'<p class="argus-sub">{t("header_subtitle", st.session_state.ui_language)}</p></div>'
         '</div>', unsafe_allow_html=True,
     )
 
-    # ==============================================================================
-    # SCHRITT 3: TABS FÜR DIE SEKTIONEN (Standardmäßig ist Tab 1 aktiv)
-    # ==============================================================================
-    tab1, tab2 = st.tabs(["🔍 Analyse-Pipeline", "👤 Profil & Leak-Check"])
+    tab1, tab2 = st.tabs([
+        t("tab_analyze", st.session_state.ui_language),
+        t("tab_profile", st.session_state.ui_language),
+    ])
 
     # --- TAB 1: ANALYSE-PIPELINE (STANDARD) ---
     with tab1:
         col_input, col_help = st.columns([3, 1])
         with col_input:
             user_input = st.text_area(
-                "Input",
-                placeholder=(
-                    "Domain          →  example.com\n"
-                    "E-Mail-Adresse  →  user@domain.com\n"
-                    "E-Mail-Inhalt   →  komplette Mail hier reinkopieren\n"
-                    "Telefonnummer   →  +49 151 12345678\n"
-                    "Dateipfad/Hash  →  /pfad/zur/datei.pdf"
-                ),
+                t("input_label", st.session_state.ui_language),
+                placeholder=t("input_placeholder", st.session_state.ui_language),
                 height=190,
                 label_visibility="collapsed",
             )
         with col_help:
-            st.markdown("**Unterstützte Inputs**")
-            for line in ["🌐 Domain / URL", "📧 E-Mail-Adresse", "📨 E-Mail-Inhalt",
-                         "📞 Telefonnummer", "📄 Datei / Hash", "🔎 Software + Version"]:
+            st.markdown(t("supported_inputs_title", st.session_state.ui_language))
+            for line in t("supported_inputs", st.session_state.ui_language):
                 st.caption(line)
 
         run_col, clear_col, _ = st.columns([1, 1, 4])
         with run_col:
-            run_btn = st.button("🔍 Analysieren", type="primary", use_container_width=True)
+            run_btn = st.button(t("btn_analyze", st.session_state.ui_language), type="primary", use_container_width=True)
         with clear_col:
-            if st.button("✕ Leeren", use_container_width=True):
+            if st.button(t("btn_clear", st.session_state.ui_language), use_container_width=True):
                 st.session_state.pop("last_result", None)
                 st.rerun()
 
         if run_btn:
             if not user_input or not user_input.strip():
-                st.warning("Bitte einen Input eingeben.")
+                st.warning(t("msg_input_required", st.session_state.ui_language))
             else:
                 t0 = time.time()
                 try:
-                    result  = run_with_live_log(user_input.strip())
+                    result  = run_with_live_log(user_input.strip(), lang=st.session_state.language)
                     elapsed = round(time.time() - t0, 1)
-                    st.success(f"✅ Analyse abgeschlossen in {elapsed}s")
+                    st.success(t("msg_analysis_complete", st.session_state.ui_language, elapsed=elapsed))
                 except Exception as e:
-                    st.error(f"❌ Pipeline-Fehler: {type(e).__name__}: {e}")
+                    st.error(t("msg_pipeline_error", st.session_state.ui_language, type=type(e).__name__, error=e))
                     st.stop()
 
                 if "history" not in st.session_state:
@@ -85,7 +85,7 @@ def main():
                 st.session_state["last_result"] = result
 
         if "last_result" in st.session_state:
-            render_results(st.session_state["last_result"])
+            render_results(st.session_state["last_result"], st.session_state.ui_language)
 
     # --- TAB 2: PROFIL & LEAK SCAN ---
     with tab2:

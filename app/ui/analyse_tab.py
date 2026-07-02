@@ -11,13 +11,14 @@ from typing import Any
 from app.graph import graph, graph_async
 from app.ui.styles import AGENT_ICON
 from app.ui.results import render_results
+from app.ui.strings import t
 from app.tools.classifier import classify_input
 from app.state import ArgusState
 
 
 # ── State-Builder ─────────────────────────────────────────────────────────────
 
-def build_initial_state(user_input: str) -> dict:
+def build_initial_state(user_input: str, lang: str = "en") -> dict:
     return {
         "user_input":     user_input,
         "input_type":     "unknown",
@@ -25,6 +26,7 @@ def build_initial_state(user_input: str) -> dict:
         "next_agent":     "",
         "findings":       [],
         "risk_score":     None,
+        "risk_level":     None,
         "summary":        None,
         "memory_context": None,
         "to_scan":        [],
@@ -32,6 +34,7 @@ def build_initial_state(user_input: str) -> dict:
         "current_check":  None,
         "file_paths":     [],
         "file_hashes":    [],
+        "language":       lang,  # Pass language to pipeline
     }
 
 
@@ -125,7 +128,7 @@ async def _run_parallel_pipeline(user_input: str, state: ArgusState,
     
     return state
 
-def run_with_live_log(user_input: str, skip_targets: set = None) -> dict:
+def run_with_live_log(user_input: str, skip_targets: set = None, lang: str = "en") -> dict:
     """Streamt die Graph-Pipeline und zeigt den Agent-Fortschritt live an.
     
     Optimierungen:
@@ -137,7 +140,7 @@ def run_with_live_log(user_input: str, skip_targets: set = None) -> dict:
     if skip_targets is None:
         skip_targets = set()
     
-    state    = build_initial_state(user_input)
+    state    = build_initial_state(user_input, lang)
     log_slot = st.empty()
     timing_slot = st.empty()
     log_rows: list[tuple] = []   # (agent, target, done, start_time)
@@ -276,48 +279,40 @@ def run_with_live_log(user_input: str, skip_targets: set = None) -> dict:
 
 def render_analyse_tab() -> None:
     """Rendert den kompletten Analyse-Pipeline Tab."""
+    lang = st.session_state.get("ui_language", "en")
     col_input, col_help = st.columns([3, 1])
 
     with col_input:
         user_input = st.text_area(
-            "Input",
-            placeholder=(
-                "Domain          →  example.com\n"
-                "E-Mail-Adresse  →  user@domain.com\n"
-                "E-Mail-Inhalt   →  komplette Mail hier reinkopieren\n"
-                "Telefonnummer   →  +49 151 12345678\n"
-                "Dateipfad/Hash  →  /pfad/zur/datei.pdf"
-            ),
+            t("input_label", lang),
+            placeholder=t("input_placeholder", lang),
             height=190,
             label_visibility="collapsed",
         )
     with col_help:
-        st.markdown("**Unterstützte Inputs**")
-        for line in [
-            "🌐 Domain / URL", "📧 E-Mail-Adresse", "📨 E-Mail-Inhalt",
-            "📞 Telefonnummer", "📄 Datei / Hash", "🔎 Software + Version",
-        ]:
+        st.markdown(t("supported_inputs_title", lang))
+        for line in t("supported_inputs", lang):
             st.caption(line)
 
     run_col, clear_col, _ = st.columns([1, 1, 4])
     with run_col:
-        run_btn = st.button("🔍 Analysieren", type="primary", use_container_width=True)
+        run_btn = st.button(t("btn_analyze", lang), type="primary", use_container_width=True)
     with clear_col:
-        if st.button("✕ Leeren", use_container_width=True):
+        if st.button(t("btn_clear", lang), use_container_width=True):
             st.session_state.pop("last_result", None)
             st.rerun()
 
     if run_btn:
         if not user_input or not user_input.strip():
-            st.warning("Bitte einen Input eingeben.")
+            st.warning(t("msg_input_required", lang))
         else:
             t0 = time.time()
             try:
-                result  = run_with_live_log(user_input.strip())
+                result  = run_with_live_log(user_input.strip(), lang=st.session_state.language)
                 elapsed = round(time.time() - t0, 1)
-                st.success(f"✅ Analyse abgeschlossen in {elapsed}s")
+                st.success(t("msg_analysis_complete", lang, elapsed=elapsed))
             except Exception as e:
-                st.error(f"❌ Pipeline-Fehler: {type(e).__name__}: {e}")
+                st.error(t("msg_pipeline_error", lang, type=type(e).__name__, error=e))
                 st.stop()
 
             if "history" not in st.session_state:
@@ -330,4 +325,4 @@ def render_analyse_tab() -> None:
             st.session_state["last_result"] = result
 
     if "last_result" in st.session_state:
-        render_results(st.session_state["last_result"])
+        render_results(st.session_state["last_result"], lang)

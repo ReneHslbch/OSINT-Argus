@@ -44,7 +44,20 @@ class IdentityAgent(BaseAgent):
             cached_result = load_cached_result(cache_key)
             if cached_result:
                 print(f"💾 [Cache] Geladene Ergebnisse für '{target}'")
-                state["findings"].append(cached_result)
+                # Cache liefert dict zurück - muss zu Findings-Objekt konvertiert werden
+                if isinstance(cached_result, dict):
+                    from app.models.findings import Findings
+                    agent_raw = cached_result.get("agent", {})
+                    agent_value = agent_raw.get("value") if isinstance(agent_raw, dict) else str(agent_raw)
+                    finding = Findings(
+                        agent=AgentType(agent_value) if agent_value else AgentType.IDENTITY,
+                        input=cached_result.get("input", target),
+                        threat_sum=cached_result.get("threat_sum", []),
+                        vulnerability_sum=cached_result.get("vulnerability_sum", [])
+                    )
+                    state["findings"].append(finding)
+                else:
+                    state["findings"].append(cached_result)
                 return state
 
         user_profile = get_user_profile()

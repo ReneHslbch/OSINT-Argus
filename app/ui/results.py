@@ -6,6 +6,40 @@ Extrahiert und rendert die Ergebnisse der Analyse-Pipeline.
 import streamlit as st
 
 from app.ui.styles import LEVEL_COLOR, LEVEL_ICON, AGENT_ICON, level_badge, score_bar
+from app.ui.strings import t
+
+
+def render_results(result: dict, lang: str = "en") -> None:
+    findings = result.get("findings") or []
+    report   = extract_output_report(findings)
+
+    threat_score = report["threat_score"] or 0
+    vuln_score   = report["vuln_score"]   or 0
+    risk_level   = report["risk_level"]   or result.get("risk_level") or "UNKNOWN"
+    indicators   = report["indicators"]
+
+    summary    = result.get("summary")      or ""
+    action_adv = result.get("action_advice") or ""
+
+    auto_expand = risk_level in ("CRITICAL", "HIGH")
+
+    st.markdown("---")
+    _render_scores(threat_score, vuln_score, risk_level, auto_expand, lang)
+
+    if indicators:
+        _render_indicators(indicators, lang)
+
+    if summary:
+        st.markdown("---")
+        with st.expander(t("expander_summary", lang), expanded=False):
+            st.info(summary)
+
+    if action_adv:
+        st.markdown("---")
+        with st.expander(t("expander_recommendations", lang), expanded=auto_expand):
+            _render_action_advice(action_adv, lang)
+
+    _render_agent_findings(findings, lang)
 
 
 # ── Daten-Extraktion ─────────────────────────────────────────────────────────
@@ -20,17 +54,35 @@ def extract_output_report(findings: list) -> dict:
     indicators: list[str] = []
 
     for f in findings:
-        agent_val  = str(getattr(getattr(f, "agent", ""), "value", ""))
-        threat_sum = getattr(f, "threat_sum", [])
-        vuln_sum   = getattr(f, "vulnerability_sum", [])
+        agent_val = None
+        threat_sum = []
+        vuln_sum = []
+        
+        # Handle both dataclass objects and dicts (LangGraph serialization)
+        if isinstance(f, dict):
+            agent_raw = f.get("agent", "")
+            if isinstance(agent_raw, dict):
+                agent_val = str(agent_raw.get("value", ""))
+            elif hasattr(agent_raw, 'value'):
+                agent_val = str(agent_raw.value)
+            else:
+                agent_val = str(agent_raw)
+            threat_sum = f.get("threat_sum", [])
+            vuln_sum = f.get("vulnerability_sum", [])
+        elif hasattr(f, 'agent'):
+            agent_val = str(f.agent.value if hasattr(f.agent, 'value') else f.agent)
+            threat_sum = getattr(f, 'threat_sum', [])
+            vuln_sum = getattr(f, 'vulnerability_sum', [])
+        else:
+            continue
 
         if agent_val != "orchestrator":
             continue
-        if not any("Threat Score" in str(t) for t in threat_sum):
+        if not any("Threat Score" in str(item) for item in threat_sum):
             continue
 
-        for t in threat_sum:
-            s = str(t)
+        for item in threat_sum:
+            s = str(item)
             if "Threat Score" in s:
                 try:
                     threat_score = int(s.split(":")[-1].strip())
@@ -42,8 +94,8 @@ def extract_output_report(findings: list) -> dict:
                 except ValueError:
                     pass
 
-        for v in vuln_sum:
-            s = str(v)
+        for item in vuln_sum:
+            s = str(item)
             if "Vulnerability Score" in s:
                 try:
                     vuln_score = int(s.split(":")[-1].strip())
@@ -60,49 +112,14 @@ def extract_output_report(findings: list) -> dict:
     }
 
 
-# ── Haupt-Render-Funktion ────────────────────────────────────────────────────
-
-def render_results(result: dict) -> None:
-    findings = result.get("findings") or []
-    report   = extract_output_report(findings)
-
-    threat_score = report["threat_score"] or 0
-    vuln_score   = report["vuln_score"]   or 0
-    risk_level   = report["risk_level"]   or result.get("risk_level") or "UNKNOWN"
-    indicators   = report["indicators"]
-
-    summary    = result.get("summary")      or ""
-    action_adv = result.get("action_advice") or ""
-
-    auto_expand = risk_level in ("CRITICAL", "HIGH")
-
-    st.markdown("---")
-    _render_scores(threat_score, vuln_score, risk_level, auto_expand)
-
-    if indicators:
-        _render_indicators(indicators)
-
-    if summary:
-        st.markdown("---")
-        with st.expander("📄 Zusammenfassung", expanded=False):
-            st.info(summary)
-
-    if action_adv:
-        st.markdown("---")
-        with st.expander("🛡️ Handlungsempfehlungen", expanded=auto_expand):
-            _render_action_advice(action_adv)
-
-    _render_agent_findings(findings)
-
-
 # ── private Hilfsfunktionen ──────────────────────────────────────────────────
 
-def _render_scores(threat_score: int, vuln_score: int, risk_level: str, auto_expand: bool = False) -> None:
+def _render_scores(threat_score: int, vuln_score: int, risk_level: str, auto_expand: bool = False, lang: str = "en") -> None:
     col_ts, col_vs, col_lvl = st.columns([1, 1, 1])
     color_t = LEVEL_COLOR.get(risk_level, "#9ca3af")
 
     with col_ts:
-        st.markdown("**Bedrohungs-Score**")
+        st.markdown(t("label_threat_score", lang))
         st.markdown(
             f'<span style="font-size:2.2rem;font-weight:700">{threat_score}</span>'
             f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
@@ -110,7 +127,7 @@ def _render_scores(threat_score: int, vuln_score: int, risk_level: str, auto_exp
             unsafe_allow_html=True,
         )
     with col_vs:
-        st.markdown("**Schwachstellen-Score**")
+        st.markdown(t("label_vulnerability_score", lang))
         st.markdown(
             f'<span style="font-size:2.2rem;font-weight:700">{vuln_score}</span>'
             f'<span style="opacity:.4;font-size:1rem"> / 100</span>'
@@ -118,22 +135,22 @@ def _render_scores(threat_score: int, vuln_score: int, risk_level: str, auto_exp
             unsafe_allow_html=True,
         )
     with col_lvl:
-        st.markdown("**Gesamteinstufung**")
+        st.markdown(t("label_risk_level", lang))
         st.markdown(level_badge(risk_level), unsafe_allow_html=True)
         
         if risk_level == "CRITICAL":
-            st.error("Sofortiger Handlungsbedarf!")
+            st.error(t("risk_critical", lang))
         elif risk_level == "HIGH":
-            st.warning("Erhöhtes Risiko — Vorsicht geboten.")
+            st.warning(t("risk_high", lang))
         elif risk_level == "MEDIUM":
-            st.info("Moderates Risiko — aufmerksam bleiben.")
+            st.info(t("risk_medium", lang))
         else:
-            st.success("Kein akutes Risiko erkannt.")
+            st.success(t("risk_low", lang))
 
 
-def _render_indicators(indicators: list[str]) -> None:
-    with st.expander("💡 Haupt-Risikoindikatoren", expanded=False):
-        st.markdown("#### 💡 Haupt-Risikoindikatoren")
+def _render_indicators(indicators: list[str], lang: str) -> None:
+    with st.expander(t("expander_indicators", lang), expanded=False):
+        st.markdown(t("header_indicators", lang))
         cols = st.columns(3)
         for i, ind in enumerate(indicators[:9]):
             clean = ind.replace("**", "").replace("`", "").strip("- ").strip()
@@ -143,7 +160,7 @@ def _render_indicators(indicators: list[str]) -> None:
                 st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
 
 
-def _render_action_advice(action_adv: str) -> None:
+def _render_action_advice(action_adv: str, lang: str) -> None:
     split_marker = "FALLS BEREITS GEKLICKT:"
     if split_marker in action_adv:
         parts         = action_adv.split(split_marker, 1)
@@ -155,64 +172,101 @@ def _render_action_advice(action_adv: str) -> None:
 
     col_p, col_i = st.columns(2)
     with col_p:
-        st.markdown("🚫 **Unbedingt vermeiden**")
+        st.markdown(t("header_prevention", lang))
         st.markdown(
             f'<div class="action-box action-prevent">{prevent_text}</div>',
             unsafe_allow_html=True,
         )
     with col_i:
-        st.markdown("🔥 **Falls bereits geklickt**")
+        st.markdown(t("header_incident", lang))
         if incident_text:
             body = incident_text
         else:
-            body = (
+            body_en = (
+                "1. Disconnect device from network immediately.<br>"
+                "2. Change passwords from a secure device.<br>"
+                "3. Contact bank / IT security.<br>"
+                "4. Scan device for malware."
+            )
+            body_de = (
                 "1. Gerät sofort vom Netzwerk trennen.<br>"
                 "2. Passwörter von einem sicheren Gerät ändern.<br>"
                 "3. Bank / IT-Sicherheit kontaktieren.<br>"
                 "4. Gerät auf Malware scannen."
             )
+            body = body_en if lang == "en" else body_de
         st.markdown(
             f'<div class="action-box action-incident">{body}</div>',
             unsafe_allow_html=True,
         )
 
 
-def _render_agent_findings(findings: list) -> None:
+def _render_agent_findings(findings: list, lang: str) -> None:
     st.markdown("---")
-    st.markdown("#### Agent-Findings (Detail)")
+    st.markdown(t("expander_agent_findings", lang))
 
     display_findings = []
     seen: set[tuple] = set()
     for f in findings:
-        agent_val = str(getattr(getattr(f, "agent", ""), "value", ""))
-        inp       = getattr(f, "input", "")
-        key       = (agent_val, inp)
+        agent_val = None
+        inp = ""
+        
+        # Handle both dataclass objects and dicts (LangGraph serialization)
+        if isinstance(f, dict):
+            agent_raw = f.get("agent", "")
+            if isinstance(agent_raw, dict):
+                agent_val = str(agent_raw.get("value", "?"))
+            elif hasattr(agent_raw, 'value'):
+                agent_val = str(agent_raw.value)
+            else:
+                agent_val = str(agent_raw) if agent_raw else "?"
+            inp = f.get("input", "")
+        elif hasattr(f, 'agent'):
+            agent_val = str(f.agent.value if hasattr(f.agent, 'value') else f.agent)
+            inp = getattr(f, 'input', "")
+        else:
+            continue
+        key = (agent_val, inp)
         if agent_val == "orchestrator" or key in seen:
             continue
         seen.add(key)
         display_findings.append(f)
 
     if not display_findings:
-        st.caption("Keine Detail-Findings vorhanden.")
+        st.caption(t("msg_no_findings", lang))
         return
 
     for f in display_findings:
-        agent_val = str(getattr(getattr(f, "agent", ""), "value", "?"))
-        inp       = getattr(f, "input", "")
-        threats   = getattr(f, "threat_sum", [])
-        vulns     = getattr(f, "vulnerability_sum", [])
-        icon      = AGENT_ICON.get(agent_val, "⚙️")
+        if isinstance(f, dict):
+            agent_raw = f.get("agent", "")
+            if isinstance(agent_raw, dict):
+                agent_val = str(agent_raw.get("value", "?"))
+            elif hasattr(agent_raw, 'value'):
+                agent_val = str(agent_raw.value)
+            else:
+                agent_val = str(agent_raw) if agent_raw else "?"
+            inp = f.get("input", "")
+            threats = f.get("threat_sum", [])
+            vulns = f.get("vulnerability_sum", [])
+        elif hasattr(f, 'agent'):
+            agent_val = str(f.agent.value if hasattr(f.agent, 'value') else f.agent)
+            inp = getattr(f, 'input', "")
+            threats = getattr(f, 'threat_sum', [])
+            vulns = getattr(f, 'vulnerability_sum', [])
+        else:
+            continue
+        icon = AGENT_ICON.get(agent_val, "⚙️")
 
         with st.expander(f"{icon} {agent_val.upper()} — {inp[:60]}", expanded=False):
             if threats:
-                st.markdown("**🎯 Bedrohungen**")
-                for t in threats:
-                    if str(t).strip():
-                        st.markdown(f"- {t}")
+                st.markdown(t("header_threats", lang))
+                for threat in threats:
+                    if str(threat).strip():
+                        st.markdown(f"- {threat}")
             if vulns:
-                st.markdown("**🔍 Schwachstellen / Befunde**")
-                for v in vulns:
-                    if str(v).strip():
-                        st.markdown(f"- {v}")
+                st.markdown(t("header_vulnerabilities", lang))
+                for vuln in vulns:
+                    if str(vuln).strip():
+                        st.markdown(f"- {vuln}")
             if not threats and not vulns:
-                st.caption("Keine Befunde.")
+                st.caption(t("msg_no_vulns", lang))
