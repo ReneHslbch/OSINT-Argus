@@ -36,15 +36,15 @@ def search_nvd_cves(technology: str) -> dict:
     }
 
     try:
-        # Kurzer Timeout, damit das System flüssig bleibt
-        resp = httpx.get(url, headers=headers, timeout=5)
+        # Timeout erhöht auf 10s, API ist oft langsam
+        resp = httpx.get(url, headers=headers, timeout=10)
         
         if resp.status_code == 200:
             data = resp.json()
             vulnerabilities = data.get("vulnerabilities", [])
             
             results = []
-            for vuln in vulnerabilities[:5]:  # Top 5 drosseln für LLM-Kontext
+            for vuln in vulnerabilities[:5]:
                 cve_id = vuln.get("cve", {}).get("id")
                 metrics = vuln.get("cve", {}).get("metrics", {}).get("cvssMetricV31", [])
                 score = metrics[0].get("cvssData", {}).get("baseScore", 0.0) if metrics else 0.0
@@ -55,21 +55,27 @@ def search_nvd_cves(technology: str) -> dict:
                     "id": cve_id,
                     "score": score,
                     "severity": severity,
-                    "description": desc[:150] + "..."
+                    "description": desc[:150] + "..." if desc else "No description"
                 })
-                
+            
             return {
                 "technology": clean_query,
                 "vulnerabilities_found": len(vulnerabilities),
                 "cves": results,
                 "verdict": "VULNERABLE" if results else "CLEAN"
             }
+        elif resp.status_code == 403 or resp.status_code == 503:
+            # API Limit oder Service Unavailable → Fallback zu Mock
+            print(f"⚠️ [CVE] NVD API limitiert ({resp.status_code}), verwende lokale Datenbank.")
+        else:
+            print(f"⚠️ [CVE] NVD API Fehler: {resp.status_code}")
             
-    except Exception:
-        # Fallback auf lokale Testmatrix, falls NIST mal wieder ein 503 sendet
-        pass
+    except httpx.TimeoutException:
+        print(f"⚠️ [CVE] NVD API Timeout (>10s), verwende lokale Datenbank.")
+    except Exception as e:
+        print(f"⚠️ [CVE] NVD API Fehler: {e}, verwende lokale Datenbank.")
 
-    # Wenn API fehlschlägt oder nichts findet, schaue im lokalen Evaluierungs-Mock nach
+    # Fallback auf lokale Testmatrix
     for key, mock_data in mock_database.items():
         if key in clean_query.lower():
             return mock_data
@@ -79,7 +85,7 @@ def search_nvd_cves(technology: str) -> dict:
         "vulnerabilities_found": 0,
         "cves": [],
         "verdict": "CLEAN",
-        "note": "Keine direkten Treffer in der NVD-Kurzabfrage gefunden."
+        "note": "Keine direkten Treffer in der NVD-Abfrage gefunden."
     }
 
 CVE_TOOLS = [search_nvd_cves]

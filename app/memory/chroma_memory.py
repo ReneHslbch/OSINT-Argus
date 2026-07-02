@@ -58,6 +58,8 @@ def get_user_profile() -> dict:
         "nachname": "Unbekannt",
         "email": "Unbekannt",
         "telefon": "Unbekannt",
+        "nicks": [],
+        "gamer_tag": "Unbekannt",
         "kompetenz_level": "UNBEKANNT",
         "fachbegriffe": [],
         "charakteristik": "Noch keine ausreichenden Textdaten analysiert."
@@ -78,3 +80,35 @@ def save_user_profile(profile_data: dict):
         documents=[json.dumps(profile_data, ensure_ascii=False)],
         metadatas=[{"updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]
     )
+
+
+def generate_username_variants(profile: dict) -> list[str]:
+    """
+    Generiert intelligente Username-Varianten für OSINT-Suchen.
+    MAXIMAL 5 Varianten für Performance (Sherlock ist langsam!).
+    Priorität: 1. E-Mail, 2. Vollname, 3. Gamer-Tag, 4. Nicks
+    """
+    variants = set()
+    MAX_VARIANTS = 5
+    
+    vorname = profile.get("vorname", "").strip().lower().replace(" ", "")
+    nachname = profile.get("nachname", "").strip().lower().replace(" ", "")
+    gamer_tag = profile.get("gamer_tag", "").strip().lower().replace(" ", "")
+    nicks = profile.get("nicks", [])
+    email = profile.get("email", "")
+    
+    if "@" in email:
+        variants.add(email.split("@")[0].lower())
+    
+    if vorname and nachname:
+        variants.add(f"{vorname}{nachname}")
+        variants.add(f"{vorname}.{nachname}")
+    
+    if gamer_tag and gamer_tag != "unbekannt":
+        variants.add(gamer_tag)
+    
+    for nick in nicks[:2]:
+        if nick and nick.strip():
+            variants.add(nick.strip().lower())
+    
+    return list(variants)[:MAX_VARIANTS]

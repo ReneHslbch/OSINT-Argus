@@ -25,7 +25,8 @@ class CVEAgent(BaseAgent):
             agent=agent,
             tools=CVE_TOOLS,
             verbose=False,
-            max_iterations=3,
+            max_iterations=2,
+            max_execution_time=15,
             return_intermediate_steps=True
         )
 
@@ -38,7 +39,16 @@ class CVEAgent(BaseAgent):
         print(f"\n[CVE] Starte NVD-Abfrage fur: '{target}'...")
         
         t0 = time.time()
-        result = self._executor.invoke({"input": target})
+        try:
+            result = self._executor.invoke({"input": target}, config={"callbacks": None})
+        except Exception as e:
+            print(f"⚠️ [CVE] Fehler oder Timeout bei '{target}': {e}")
+            result = {"output": json.dumps({
+                "threat_indicators": [],
+                "exposure_findings": [],
+                "summary": f"Timeout/Fehler bei CVE-Abfrage für {target}"
+            })}
+        
         elapsed_ms = (time.time() - t0) * 1000
         
         iteration_count = result.get("intermediate_steps", [])
