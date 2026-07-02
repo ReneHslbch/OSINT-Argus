@@ -125,37 +125,47 @@ async def _run_parallel_pipeline(user_input: str, state: ArgusState,
     
     return state
 
-def run_with_live_log(user_input: str) -> dict:
+def run_with_live_log(user_input: str, skip_targets: set = None) -> dict:
     """Streamt die Graph-Pipeline und zeigt den Agent-Fortschritt live an.
     
     Optimierungen:
     1. Zeitmessung pro Graph-Knoten (Performance-Metriken)
     2. Deterministisches Routing für Regex-klassifizierte Targets
     3. Parallele Verarbeitung unabhängiger Targets
+    4. Skip-Funktion für individuelle Targets
     """
+    if skip_targets is None:
+        skip_targets = set()
+    
     state    = build_initial_state(user_input)
     log_slot = st.empty()
     timing_slot = st.empty()
-    log_rows: list[tuple] = []   # (agent, target, done)
+    log_rows: list[tuple] = []   # (agent, target, done, start_time)
     t0 = time.time()
     
-    # Performance-Metriken pro Knoten
     node_timings: dict[str, list[dict[str, Any]]] = {}
 
     def render_log() -> None:
         from app.ui.styles import CSS
 
         rows_html = ""
-        for agent, target, done in log_rows[-14:]:
+        for i, (agent, target, done, start_time) in enumerate(log_rows[-14:]):
             icon   = AGENT_ICON.get(agent, "⚙️")
             status = "✅" if done else "⏳"
             tgt    = target[:60] if target else ""
+            elapsed_ms = int((time.time() - start_time) * 1000) if not done else ""
+            time_str = f"{elapsed_ms}ms" if elapsed_ms else ""
+            
+            row_class = "live-row"
+            if not done:
+                row_class += " live-row-active"
             
             rows_html += (
-                f'<div class="live-row">'
+                f'<div class="{row_class}">'
                 f'<span style="font-size:1rem;">{icon}</span>'
                 f'<span class="live-agent">{agent.upper()}</span>'
                 f'<span class="live-target">{tgt}</span>'
+                f'<span class="live-time">{time_str}</span>'
                 f'<span class="live-status">{status}</span>'
                 f'</div>'
             )
@@ -190,11 +200,11 @@ def run_with_live_log(user_input: str) -> dict:
 
     has_parallel = any(
         classify_input(t) in ("email", "domain") 
-        for t in state.get("to_scan", [])
+        for t in state.get("to_scan", []) if t not in skip_targets
     )
     
     if has_parallel and len([t for t in state.get("to_scan", []) 
-                              if classify_input(t) in ("email", "domain")]) > 1:
+                              if classify_input(t) in ("email", "domain") and t not in skip_targets]) > 1:
         print("\n⚡ [Parallel Mode] Starte parallele Verarbeitung unabhängiger Targets...")
         
         try:
@@ -225,10 +235,15 @@ def run_with_live_log(user_input: str) -> dict:
             for node_name, node_state in chunk.items():
                 if log_rows:
                     prev = log_rows[-1]
-                    log_rows[-1] = (prev[0], prev[1], True)
+                    log_rows[-1] = (prev[0], prev[1], True, prev[3])
 
                 target = node_state.get("current_check") or ""
-                log_rows.append((node_name, target, False))
+                
+                if target in skip_targets:
+                    print(f"⏭️ [SKIP] Überspringe Target: {target}")
+                    continue
+                
+                log_rows.append((node_name, target, False, time.time()))
                 render_log()
 
                 for key in ("risk_score", "risk_level", "summary", "action_advice",
@@ -245,7 +260,7 @@ def run_with_live_log(user_input: str) -> dict:
 
         if log_rows:
             prev = log_rows[-1]
-            log_rows[-1] = (prev[0], prev[1], True)
+            log_rows[-1] = (prev[0], prev[1], True, prev[3])
         render_log()
         render_timings()
 

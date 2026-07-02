@@ -74,26 +74,30 @@ def render_results(result: dict) -> None:
     summary    = result.get("summary")      or ""
     action_adv = result.get("action_advice") or ""
 
-    st.markdown("---")
-    _render_scores(threat_score, vuln_score, risk_level)
+    auto_expand = risk_level in ("CRITICAL", "HIGH")
 
-    if summary:
-        st.markdown("---")
-        st.markdown("#### Zusammenfassung")
-        st.info(summary)
+    st.markdown("---")
+    _render_scores(threat_score, vuln_score, risk_level, auto_expand)
 
     if indicators:
         _render_indicators(indicators)
 
+    if summary:
+        st.markdown("---")
+        with st.expander("📄 Zusammenfassung", expanded=False):
+            st.info(summary)
+
     if action_adv:
-        _render_action_advice(action_adv)
+        st.markdown("---")
+        with st.expander("🛡️ Handlungsempfehlungen", expanded=auto_expand):
+            _render_action_advice(action_adv)
 
     _render_agent_findings(findings)
 
 
 # ── private Hilfsfunktionen ──────────────────────────────────────────────────
 
-def _render_scores(threat_score: int, vuln_score: int, risk_level: str) -> None:
+def _render_scores(threat_score: int, vuln_score: int, risk_level: str, auto_expand: bool = False) -> None:
     col_ts, col_vs, col_lvl = st.columns([1, 1, 1])
     color_t = LEVEL_COLOR.get(risk_level, "#9ca3af")
 
@@ -116,6 +120,7 @@ def _render_scores(threat_score: int, vuln_score: int, risk_level: str) -> None:
     with col_lvl:
         st.markdown("**Gesamteinstufung**")
         st.markdown(level_badge(risk_level), unsafe_allow_html=True)
+        
         if risk_level == "CRITICAL":
             st.error("Sofortiger Handlungsbedarf!")
         elif risk_level == "HIGH":
@@ -127,20 +132,18 @@ def _render_scores(threat_score: int, vuln_score: int, risk_level: str) -> None:
 
 
 def _render_indicators(indicators: list[str]) -> None:
-    st.markdown("#### 💡 Haupt-Risikoindikatoren")
-    cols = st.columns(3)
-    for i, ind in enumerate(indicators[:9]):
-        clean = ind.replace("**", "").replace("`", "").strip("- ").strip()
-        if not clean:
-            continue
-        with cols[i % 3]:
-            st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
+    with st.expander("💡 Haupt-Risikoindikatoren", expanded=False):
+        st.markdown("#### 💡 Haupt-Risikoindikatoren")
+        cols = st.columns(3)
+        for i, ind in enumerate(indicators[:9]):
+            clean = ind.replace("**", "").replace("`", "").strip("- ").strip()
+            if not clean:
+                continue
+            with cols[i % 3]:
+                st.markdown(f'<div class="indicator-pill">⚠️ {clean}</div>', unsafe_allow_html=True)
 
 
 def _render_action_advice(action_adv: str) -> None:
-    st.markdown("---")
-    st.markdown("#### Handlungsempfehlungen")
-
     split_marker = "FALLS BEREITS GEKLICKT:"
     if split_marker in action_adv:
         parts         = action_adv.split(split_marker, 1)

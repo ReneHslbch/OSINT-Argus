@@ -34,6 +34,20 @@ CSS = """
 .live-agent  { font-weight: 600; min-width: 110px; }
 .live-target { font-family: monospace; opacity: 0.7; font-size: 0.78rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-status { margin-left: auto; font-size: 0.85rem; }
+.live-time   { font-size: 0.7rem; opacity: 0.5; min-width: 50px; text-align: right; }
+.live-skip-btn {
+    margin-left: 8px;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    background: rgba(128,128,128,0.1);
+    border: 1px solid rgba(128,128,128,0.2);
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.live-row:hover .live-skip-btn { opacity: 1; }
+.live-skip-btn:hover { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.3); }
 
 .memory-card {
     background: rgba(128,128,128,0.06); border: 1px solid rgba(128,128,128,0.12);

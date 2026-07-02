@@ -4,6 +4,7 @@ Tab 2: Digitale Identitäts-Akte — Profil-Verwaltung, OSINT-Scan
 und kombinierte Ergebnisdarstellung.
 """
 
+import time
 import streamlit as st
 
 from app.memory.chroma_memory import get_user_profile, save_user_profile
@@ -21,34 +22,43 @@ def render_leak_tab() -> None:
     )
 
     current_profile = get_user_profile()
-    vorname, nachname, email, telefon = _render_profile_form(current_profile)
-    _render_osint_scan_button(vorname, nachname, email, current_profile)
+    vorname, nachname, email, telefon, nicks, gamer_tag = _render_profile_form(current_profile)
+    _render_osint_scan_button(vorname, nachname, email, nicks, gamer_tag, current_profile)
     _render_scan_results(current_profile)
 
 
 # ── Profil-Formular ───────────────────────────────────────────────────────────
 
-def _render_profile_form(current_profile: dict) -> tuple[str, str, str, str]:
+def _render_profile_form(current_profile: dict) -> tuple[str, str, str, str, list, str]:
     """Zeigt das editierbare Profil-Formular und gibt die aktuellen Feldwerte zurück."""
     with st.form("profile_form"):
         col1, col2 = st.columns(2)
         with col1:
             vorname = st.text_input("Vorname",                          value=current_profile.get("vorname",   "Unbekannt"))
             email   = st.text_input("E-Mail-Adresse (für Leak-Checks)", value=current_profile.get("email",    "Unbekannt"))
+            nicks   = st.text_area("Nicks / Spitznamen (durch Komma getrennt)", 
+                                   value=", ".join(current_profile.get("nicks", [])), 
+                                   placeholder="z.B. Max, Momo, Gamer123")
         with col2:
             nachname = st.text_input("Nachname",       value=current_profile.get("nachname", "Unbekannt"))
             telefon  = st.text_input("Telefonnummer",  value=current_profile.get("telefon",  "Unbekannt"))
+            gamer_tag = st.text_input("Gamer Tag / Handle", 
+                                      value=current_profile.get("gamer_tag", "Unbekannt"))
 
         st.markdown(f"**Erkanntes IT-Kompetenzlevel:** `{current_profile.get('kompetenz_level', 'UNBEKANNT')}`")
         st.markdown(f"**Gefundene Fachbegriffe:** {', '.join(current_profile.get('fachbegriffe', [])) or 'Keine'}")
         st.caption(f"*Profiler-Charakteristik:* {current_profile.get('charakteristik', '')}")
 
+        nick_list = []
         if st.form_submit_button("Profil-Änderungen speichern"):
+            nick_list = [n.strip() for n in nicks.split(",") if n.strip()]
             updated = {
                 "vorname":          vorname,
                 "nachname":         nachname,
                 "email":            email,
                 "telefon":          telefon,
+                "nicks":            nick_list,
+                "gamer_tag":        gamer_tag,
                 "kompetenz_level":  current_profile.get("kompetenz_level", "UNBEKANNT"),
                 "fachbegriffe":     current_profile.get("fachbegriffe", []),
                 "charakteristik":   "Manuell vom Nutzer angepasst.",
@@ -57,17 +67,17 @@ def _render_profile_form(current_profile: dict) -> tuple[str, str, str, str]:
             st.success("Profil erfolgreich in ChromaDB aktualisiert!")
             st.rerun()
 
-    return vorname, nachname, email, telefon
+    return vorname, nachname, email, telefon, nick_list, gamer_tag
 
 
 # ── OSINT-Scan-Button ─────────────────────────────────────────────────────────
 
 def _render_osint_scan_button(
-    vorname: str, nachname: str, email: str, current_profile: dict
+    vorname: str, nachname: str, email: str, nicks: list, gamer_tag: str, current_profile: dict
 ) -> None:
     st.subheader("🛡️ On-Demand OSINT Target-Scanning")
     st.write(
-        "Triggere den `LeakAgent` (E-Mail) und den `IdentityAgent` (Klarname) parallel, "
+        "Triggere den `LeakAgent` (E-Mail) und den `IdentityAgent` (Klarname, Nicks, Gamer-Tags) parallel, "
         "um Exposures und Profile aufzudecken."
     )
 
@@ -76,14 +86,16 @@ def _render_osint_scan_button(
 
     has_valid_email = bool(email and email != "Unbekannt" and "@" in email)
     fullname_target = f"{vorname.strip()} {nachname.strip()}".replace("Unbekannt", "").strip()
+    has_nicks = bool(nicks or gamer_tag and gamer_tag != "Unbekannt")
 
-    if not has_valid_email and not fullname_target:
-        st.error("❌ Bitte trage zuerst einen Namen oder eine E-Mail-Adresse im Profil ein.")
+    if not has_valid_email and not fullname_target and not has_nicks:
+        st.error("❌ Bitte trage zuerst einen Namen, eine E-Mail-Adresse oder einen Nick/Gamer-Tag im Profil ein.")
         return
 
     st.session_state["osint_scan_results"] = {}
+    skip_targets = st.session_state.get("skip_osint_targets", set())
 
-    if has_valid_email:
+    if has_valid_email and email not in skip_targets:
         with st.spinner(f"🕵️ LeakAgent sucht nach Datenlecks für '{email}'..."):
             try:
                 res = LeakAgent().run({"current_check": email, "findings": []})
@@ -92,14 +104,40 @@ def _render_osint_scan_button(
             except Exception as e:
                 st.error(f"Fehler im LeakAgent: {e}")
 
+    search_targets = []
     if fullname_target:
-        with st.spinner(f"🔎 IdentityAgent scannt soziale Profile für '{fullname_target}'..."):
-            try:
-                res = IdentityAgent().run({"current_check": fullname_target, "findings": []})
-                if res.get("findings"):
-                    st.session_state["osint_scan_results"]["identity"] = res["findings"][-1]
-            except Exception as e:
-                st.error(f"Fehler im IdentityAgent: {e}")
+        search_targets.append(("Name", fullname_target))
+    for nick in nicks:
+        if nick.strip():
+            search_targets.append(("Nick", nick.strip()))
+    if gamer_tag and gamer_tag != "Unbekannt":
+        search_targets.append(("Gamer-Tag", gamer_tag))
+
+    if search_targets:
+        st.markdown("### 🔎 OSINT-Scan Ergebnisse")
+        
+        all_findings = []
+        for idx, (label, target) in enumerate(search_targets):
+            if target in skip_targets:
+                st.caption(f"⏭️ Übersprungen: {label} '{target}'")
+                continue
+            
+            start_time = time.time()
+            with st.spinner(f"🔍 Scan {idx+1}/{len(search_targets)}: {label} '{target}'..."):
+                try:
+                    res = IdentityAgent().run({"current_check": target, "findings": []})
+                    elapsed = round(time.time() - start_time, 1)
+                    
+                    if res.get("findings"):
+                        all_findings.extend(res["findings"])
+                        st.success(f"✅ {label} ({elapsed}s)")
+                    else:
+                        st.warning(f"⚠️ Keine Ergebnisse für {label} ({elapsed}s)")
+                except Exception as e:
+                    st.error(f"❌ Fehler bei {label}: {e}")
+        
+        if all_findings:
+            st.session_state["osint_scan_results"]["identity"] = all_findings[-1]
 
 
 # ── Ergebnis-Rendering ────────────────────────────────────────────────────────
@@ -168,30 +206,16 @@ def _render_executive_summary(scan_data: dict) -> None:
     st.markdown(
         f"""
         <div style="background-color:#f4f6f9;border-left:5px solid #1f77b4;
-                    padding:15px;border-radius:6px;margin-bottom:20px;">
-            <h4 style="margin:0 0 5px 0;color:#1f77b4;">🔮 OutputAgent: Lagebeurteilung</h4>
-            <p style="font-size:1.1rem;font-weight:bold;margin:0;">"{summary.headline}"</p>
+                    padding:12px;border-radius:6px;margin-bottom:15px;">
+            <p style="font-size:1.05rem;font-weight:bold;margin:0;">"{summary.headline}"</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**🌐 Digitale Präsenz:**")
-        st.write(summary.digital_footprint_summary)
-    with c2:
-        st.markdown("**🎯 Primärer Angriffsvektor:**")
-        st.write(summary.primary_threat_vector)
-
-    st.markdown("##### 🛠️ Sofortige Abwehrmaßnahmen (Action Items):")
-    for item in summary.action_items:
-        st.markdown(f"- [ ] {item}")
-    st.markdown("---")
-
 
 def _render_identity_column(scan_data: dict) -> None:
-    st.markdown("### 👤 IdentityAgent Profil-Funde")
+    st.markdown("### 👤 Profil-Funde")
 
     if "identity" not in scan_data:
         st.caption("Keine Identitätsdaten geladen.")
@@ -199,18 +223,18 @@ def _render_identity_column(scan_data: dict) -> None:
 
     ident_finding = scan_data["identity"]
     vector_text   = "".join(ident_finding.threat_sum).lower()
-    risk_color    = "red" if ("high" in vector_text or "critical" in vector_text) else "orange"
+    risk_color    = "#dc2626" if ("high" in vector_text or "critical" in vector_text) else "#ea580c"
 
+    risk_label = "⚠️ HIGH" if ("high" in vector_text or "critical" in vector_text) else "⚠️ MEDIUM"
     st.markdown(
-        f"**Spear-Phishing Vektor-Risiko:** "
-        f"<span style='color:{risk_color};font-weight:bold;font-size:1.1rem;'>⚠️ HIGH</span>",
+        f"**Spear-Phishing-Risiko:** <span style='color:{risk_color};font-weight:bold;font-size:1.1rem;'>{risk_label}</span>",
         unsafe_allow_html=True,
     )
-    st.markdown("#### 🌐 Verifizierte Profile & Vektoren")
 
-    raw_entries     = ident_finding.vulnerability_sum
-    current_platform = None
+    raw_entries = ident_finding.vulnerability_sum
+
     platform_data: dict[str, dict] = {}
+    current_platform = None
 
     for entry in raw_entries:
         entry_str = str(entry).strip()
@@ -227,10 +251,10 @@ def _render_identity_column(scan_data: dict) -> None:
             url = entry_str.split("(")[1].split(")")[0] if "(" in entry_str else entry_str
             platform_data[current_platform] = {"url": url, "angriffsvektor": "", "pretexts": []}
 
-        elif current_platform and "angriffsvektor:" in entry_str.lower():
-            platform_data[current_platform]["angriffsvektor"] = (
-                entry_str.split("Angriffsvektor:")[1].strip()
-            )
+        elif current_platform and "angriffsvektor" in entry_str.lower():
+            parts = entry_str.split(":", 1)
+            if len(parts) > 1:
+                platform_data[current_platform]["angriffsvektor"] = parts[1].strip()
 
         elif current_platform and (entry_str.startswith("•") or entry_str.startswith("- •")):
             clean_pretext = entry_str.replace("•", "").replace('"', "").strip()
@@ -238,22 +262,19 @@ def _render_identity_column(scan_data: dict) -> None:
 
     if platform_data:
         for plat_name, data in platform_data.items():
-            st.markdown(f"**🔗 Plattform:** [{plat_name}]({data['url']})")
+            st.markdown(f"🔗 **{plat_name}:** [{data['url']}]({data['url']})")
             if data["angriffsvektor"]:
-                st.caption(f"**Gefahrenanalyse:** {data['angriffsvektor']}")
-            if data["pretexts"]:
-                with st.expander(f"🎯 Mögliche Phishing-Betreffzeilen ({plat_name})"):
-                    for pt in data["pretexts"]:
-                        st.code(pt, language="text")
-            st.markdown("<div style='margin-bottom:15px;'></div>", unsafe_allow_html=True)
+                st.caption(f"⚡ {data['angriffsvektor']}")
+            else:
+                st.caption("⚡ Keine spezifischen Angriffsvektoren gefunden.")
     else:
-        st.info("Profile gefunden. Details im Expander:")
+        st.info("Keine Profile gefunden.")
         with st.expander("Rohdaten anzeigen"):
             st.write(raw_entries)
 
 
 def _render_leak_column(scan_data: dict) -> None:
-    st.markdown("### 🛡️ LeakAgent Exposure-Funde")
+    st.markdown("### 🛡️ Leak-Funde")
 
     if "leak" not in scan_data:
         st.caption("Keine Leak-Daten geladen.")
@@ -263,28 +284,53 @@ def _render_leak_column(scan_data: dict) -> None:
     breaches     = leak_finding.vulnerability_sum
 
     if not breaches:
-        st.success("🎉 **Entwarnung:** Keine bekannten Datenlecks für diese E-Mail registriert.")
+        st.success("✅ Keine bekannten Datenlecks.")
         return
 
-    st.error(f"🚨 **Gefahr:** Diese Identität ist in **{len(breaches)} Datenlecks** vertreten!")
+    st.error(f"🚨 **{len(breaches)} Datenleck(s)** gefunden!")
+
+    leak_details = {
+        "canva": {
+            "geleakt": "E-Mail, Name, Passwort, Mitgliedschaften in Design-Gruppen",
+            "risiko": "Passwort-Wiederverwendung testen, Interessen (Design) sichtbar für gezielte Angriffe"
+        },
+        "zynga": {
+            "geleakt": "E-Mail, Passwort, Benutzername (Gaming-Dienste)",
+            "risiko": "Passwort könnte bei anderen Diensten funktionieren"
+        },
+        "adobe": {
+            "geleakt": "E-Mail, Passwort, Kreditkarten-Endung (Creative Cloud)",
+            "risiko": "Zugang zu Adobe-Diensten bei Passwort-Wiederverwendung"
+        },
+        "linkedin": {
+            "geleakt": "E-Mail, Passwort, Profil-Daten (Beruf, Unternehmen)",
+            "risiko": "Business Email Compromise (BEC), gezielte Angriffe über Berufsnetzwerk"
+        },
+        "dropbox": {
+            "geleakt": "E-Mail, Passwort (Cloud-Speicher)",
+            "risiko": "Zugriff auf private Dateien bei Passwort-Wiederverwendung"
+        }
+    }
 
     for vuln in breaches:
         display_name = str(vuln).replace("Breach: ", "")
+        display_lower = display_name.lower()
+
+        detail = None
+        for key, info in leak_details.items():
+            if key in display_lower:
+                detail = info
+                break
+
         st.markdown(
             f"""
-            <div style="background-color:#ffeded;border-left:5px solid #ff4b4b;
+            <div style="background-color:#ffeded;border-left:4px solid #ff4b4b;
                         padding:10px;border-radius:4px;margin-bottom:8px;">
                 <strong style="color:#ff4b4b;">🔥 {display_name}</strong><br/>
-                <small style="color:#555;">Kategorie: Credential Leak Exposure</small>
+                <small style="color:#666;margin-top:4px;display:block;">
+                {detail['geleakt'] if detail else 'Daten bekannt aus Breach-Datenbank'}
+                </small>
             </div>
             """,
             unsafe_allow_html=True,
         )
-
-        if "zynga" in display_name.lower():
-            with st.expander("ℹ️ Details zu Zynga"):
-                st.write("**Geleakt:** Passwörter (SHA-1), E-Mails, Usernames.")
-                st.write(
-                    "**Risiko:** Angreifer testen diese Kombinationen automatisiert "
-                    "bei anderen Portalen."
-                )
