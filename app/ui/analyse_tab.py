@@ -14,6 +14,7 @@ from app.ui.results import render_results
 from app.ui.strings import t
 from app.tools.classifier import classify_input
 from app.state import ArgusState
+from app.utils.prompt_cleaner import clean_llm_output
 
 
 # ── State-Builder ─────────────────────────────────────────────────────────────
@@ -129,16 +130,12 @@ async def _run_parallel_pipeline(user_input: str, state: ArgusState,
     return state
 
 def run_with_live_log(user_input: str, skip_targets: set = None, lang: str = "en") -> dict:
-    """Streamt die Graph-Pipeline und zeigt den Agent-Fortschritt live an.
-    
-    Optimierungen:
-    1. Zeitmessung pro Graph-Knoten (Performance-Metriken)
-    2. Deterministisches Routing für Regex-klassifizierte Targets
-    3. Parallele Verarbeitung unabhängiger Targets
-    4. Skip-Funktion für individuelle Targets
-    """
+    """Streamt die Graph-Pipeline und zeigt den Agent-Fortschritt live an."""
     if skip_targets is None:
         skip_targets = set()
+    
+    # <environment_details> Block aus user_input entfernen
+    user_input = clean_llm_output(user_input)
     
     state    = build_initial_state(user_input, lang)
     log_slot = st.empty()
@@ -155,7 +152,7 @@ def run_with_live_log(user_input: str, skip_targets: set = None, lang: str = "en
         for i, (agent, target, done, start_time) in enumerate(log_rows[-14:]):
             icon   = AGENT_ICON.get(agent, "⚙️")
             status = "✅" if done else "⏳"
-            tgt    = target[:60] if target else ""
+            tgt    = (clean_llm_output(target))[:60] if target else ""
             elapsed_ms = int((time.time() - start_time) * 1000) if not done else ""
             time_str = f"{elapsed_ms}ms" if elapsed_ms else ""
             
@@ -236,11 +233,25 @@ def run_with_live_log(user_input: str, skip_targets: set = None, lang: str = "en
     else:
         for chunk in graph.stream(state, stream_mode="updates"):
             for node_name, node_state in chunk.items():
+                target = node_state.get("current_check") or ""
+                target = clean_llm_output(target)
+                
+                if node_name == "output":
+                    # Output-Node: Alle wichtigen Keys übernehmen
+                    for key in ("risk_score", "risk_level", "summary", "action_advice", "findings"):
+                        if node_state.get(key) is not None:
+                            if key == "findings" and isinstance(node_state[key], list):
+                                final_state[key] = node_state[key]
+                            elif key != "findings":
+                                final_state[key] = node_state[key]
+                    continue
+                
                 if log_rows:
                     prev = log_rows[-1]
                     log_rows[-1] = (prev[0], prev[1], True, prev[3])
-
-                target = node_state.get("current_check") or ""
+                
+                if not target or not target.strip() or "<environment_details>" in target:
+                    continue
                 
                 if target in skip_targets:
                     print(f"⏭️ [SKIP] Überspringe Target: {target}")
@@ -271,6 +282,14 @@ def run_with_live_log(user_input: str, skip_targets: set = None, lang: str = "en
     
     if "node_timings" not in final_state:
         final_state["node_timings"] = node_timings
+    
+    # Debug: nur kurze Preview
+    print(f"[DEBUG] run_with_live_log: final_state keys = {final_state.keys()}")
+    print(f"[DEBUG] run_with_live_log: risk_score = {final_state.get('risk_score')}")
+    print(f"[DEBUG] run_with_live_log: risk_level = {final_state.get('risk_level')}")
+    print(f"[DEBUG] run_with_live_log: summary preview = {str(final_state.get('summary', ''))[:100]!r}")
+    print(f"[DEBUG] run_with_live_log: action_advice preview = {str(final_state.get('action_advice', ''))[:100]!r}")
+    print(f"[DEBUG] run_with_live_log: findings count = {len(final_state.get('findings', []))}")
     
     return final_state
 

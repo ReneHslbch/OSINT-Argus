@@ -8,6 +8,7 @@ from app.models.findings import Findings
 from app.models.agent_type import AgentType
 from app.memory.chroma_memory import save_analysis
 from app.prompts import OUTPUT_AGENT_SYSTEM_PROMPT
+from app.utils.prompt_cleaner import clean_llm_output
 
 llm = get_llm().with_config(request_timeout=60)
 
@@ -34,19 +35,40 @@ def _format_findings_for_llm(state: ArgusState, lang: str = "en") -> str:
     lines = []
     for f in state["findings"]:
         agent_name = f.agent.value if hasattr(f.agent, "value") else str(f.agent)
+        # <environment_details> Block aus jedem Finding entfernen
+        input_clean = clean_llm_output(str(f.input))
+        threat_clean = []
+        vuln_clean = []
+        
+        if isinstance(f.threat_sum, list):
+            for t in f.threat_sum:
+                cleaned = clean_llm_output(str(t))
+                if cleaned and "<environment_details>" not in cleaned:
+                    threat_clean.append(cleaned)
+        else:
+            threat_clean = [clean_llm_output(str(f.threat_sum))]
+            
+        if isinstance(f.vulnerability_sum, list):
+            for v in f.vulnerability_sum:
+                cleaned = clean_llm_output(str(v))
+                if cleaned and "<environment_details>" not in cleaned:
+                    vuln_clean.append(cleaned)
+        else:
+            vuln_clean = [clean_llm_output(str(f.vulnerability_sum))]
+        
         if lang == "de":
             lines.append(
                 f"=== Finding von Agent: {agent_name} ===\n"
-                f"Prüfobjekt (Input): {f.input}\n"
-                f"Bedrohungen (Threats): {f.threat_sum}\n"
-                f"Schwachstellen (Vulnerabilities): {f.vulnerability_sum}\n"
+                f"Prüfobjekt (Input): {input_clean}\n"
+                f"Bedrohungen (Threats): {threat_clean}\n"
+                f"Schwachstellen (Vulnerabilities): {vuln_clean}\n"
             )
         else:
             lines.append(
                 f"=== Finding from Agent: {agent_name} ===\n"
-                f"Check Object (Input): {f.input}\n"
-                f"Threats: {f.threat_sum}\n"
-                f"Vulnerabilities: {f.vulnerability_sum}\n"
+                f"Check Object (Input): {input_clean}\n"
+                f"Threats: {threat_clean}\n"
+                f"Vulnerabilities: {vuln_clean}\n"
             )
     return "\n".join(lines)
 
@@ -63,6 +85,9 @@ class OutputAgent(BaseAgent):
         findings_text = _format_findings_for_llm(state, lang)
         system_prompt = _get_output_prompt(lang)
 
+        # <environment_details> Block aus findings_text entfernen (doppelte Sicherheit)
+        findings_text = clean_llm_output(findings_text)
+
         if lang == "de":
             prompt_input = (
                 f"Eingabetyp des Systems: {input_type}\n\n"
@@ -76,11 +101,21 @@ class OutputAgent(BaseAgent):
                 f"Create the final risk report including prevention and incident response steps."
             )
 
+        # Nochmal bereinigen, falls der Block trotzdem durchkam
+        prompt_input = clean_llm_output(prompt_input)
+
         try:
-            report: OutputReport = self._llm.invoke([
+            report_raw = self._llm.invoke([
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": prompt_input},
             ])
+            
+            # Structured output sollte bereits sauber sein
+            if hasattr(report_raw, 'model_dump'):
+                report = report_raw
+            else:
+                cleaned = clean_llm_output(str(report_raw))
+                report = OutputReport(**json.loads(cleaned))
         except Exception as e:
             print(f"[WARN] OutputAgent: Structured output fehlgeschlagen - {e}")
             # Fallback bei unerwarteten API- oder Parsingfehlern
@@ -98,24 +133,30 @@ class OutputAgent(BaseAgent):
         # ── State befüllen ───────────────────────────────────────────────────
         state["risk_score"] = max(report.threat_score, report.vulnerability_score) 
         state["risk_level"] = report.risk_level
-        state["summary"] = report.summary
+        state["summary"] = clean_llm_output(report.summary)  # Bereinigen
+        state["current_check"] = None  # OutputAgent hat kein Target
+        
+        # action_advice bereinigen
+        action_prevent_clean = clean_llm_output(report.action_prevent)
+        action_incident_clean = [clean_llm_output(str(a)) for a in report.action_incident_response]
+        
         if lang == "de":
-            state["action_advice"] = f"PRÄVENTION:\n{report.action_prevent}\n\nFALLS BEREITS GEKLICKT:\n" + "\n".join(report.action_incident_response)
+            state["action_advice"] = f"PRÄVENTION:\n{action_prevent_clean}\n\nFALLS BEREITS GEKLICKT:\n" + "\n".join(action_incident_clean)
         else:
-            state["action_advice"] = f"PREVENTION:\n{report.action_prevent}\n\nIF ALREADY CLICKED:\n" + "\n".join(report.action_incident_response)
+            state["action_advice"] = f"PREVENTION:\n{action_prevent_clean}\n\nIF ALREADY CLICKED:\n" + "\n".join(action_incident_clean)
 
         # Hänge den finalen Report als echtes Findings-Objekt an die Liste an
+        indicators_clean = [clean_llm_output(str(i)) for i in report.indicators if i and "<environment_details>" not in i]
+        
         final_finding = Findings(
             agent=AgentType.ORCHESTRATOR, 
             input="Zusammenfassung aller Findings" if lang == "de" else "Summary of all findings",
             threat_sum=[f"Threat Score: {report.threat_score}", f"Level: {report.risk_level}"],
-            vulnerability_sum=[f"Vulnerability Score: {report.vulnerability_score}"] + report.indicators
+            vulnerability_sum=[f"Vulnerability Score: {report.vulnerability_score}"] + indicators_clean
         )
         state["findings"].append(final_finding)
 
         # ── NEU: Strukturiertes JSON für ChromaDB bauen ──────────────────────
-        # Wir packen alle wichtigen Metadaten direkt in das Dokument, damit 
-        # die Sidebar darauf zugreifen kann.
         chroma_payload = {
             "risk_level": report.risk_level,
             "score": max(report.threat_score, report.vulnerability_score),
@@ -125,7 +166,6 @@ class OutputAgent(BaseAgent):
             "action_incident_response": report.action_incident_response
         }
 
-        # Als JSON-String serialisiert in die ChromaDB wegschreiben
         save_analysis(
             query=state.get("user_input", ""),
             content=json.dumps(chroma_payload, ensure_ascii=False)

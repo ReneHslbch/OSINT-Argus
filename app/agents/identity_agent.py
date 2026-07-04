@@ -10,6 +10,7 @@ from app.tools.identity_tools import check_email_with_holehe, search_username_wi
 from app.prompts import IDENTITY_AGENT_SYSTEM_PROMPT
 from app.memory.chroma_memory import get_user_profile, generate_username_variants
 from app.tools.result_cache import cache_exists, load_cached_result, save_result
+from app.utils.prompt_cleaner import clean_llm_output
 
 
 class PlatformFinding(BaseModel):
@@ -114,7 +115,7 @@ class IdentityAgent(BaseAgent):
                 osint_raw_data.append(result)
 
         # LLM-Analyse
-        analysis: IdentityAnalysis = self.llm.invoke([
+        analysis_raw = self.llm.invoke([
             {
                 "role": "system",
                 "content": IDENTITY_AGENT_SYSTEM_PROMPT
@@ -130,6 +131,22 @@ OSINT-Rohdaten:
 """
             }
         ])
+        
+        # Structured output sollte bereits sauber sein
+        if hasattr(analysis_raw, 'model_dump'):
+            analysis = analysis_raw
+        else:
+            cleaned = clean_llm_output(str(analysis_raw))
+            try:
+                analysis = IdentityAnalysis(**json.loads(cleaned))
+            except Exception as e:
+                print(f"[WARN] [IDENT] Parsing-Fehler: {e}")
+                analysis = IdentityAnalysis(
+                    social_engineering_vector="Parsing-Fehler bei OSINT-Analyse",
+                    risk_assessment="UNKNOWN",
+                    platform_details=[],
+                    reasoning="Konnte OSINT-Ergebnisse nicht korrekt parsen."
+                )
 
         # Befunde strukturieren
         platform_entries = []

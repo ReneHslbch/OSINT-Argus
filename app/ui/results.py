@@ -3,10 +3,12 @@ app/ui/results.py
 Extrahiert und rendert die Ergebnisse der Analyse-Pipeline.
 """
 
+import re
 import streamlit as st
 
 from app.ui.styles import LEVEL_COLOR, LEVEL_ICON, AGENT_ICON, level_badge, score_bar
 from app.ui.strings import t
+from app.utils.prompt_cleaner import clean_llm_output
 
 
 def render_results(result: dict, lang: str = "en") -> None:
@@ -270,3 +272,121 @@ def _render_agent_findings(findings: list, lang: str) -> None:
                         st.markdown(f"- {vuln}")
             if not threats and not vulns:
                 st.caption(t("msg_no_vulns", lang))
+
+
+# ── Mail-Content-Generator ────────────────────────────────────────────────────
+
+def map_result_to_mail(result: dict, lang: str = "en") -> tuple:
+    """
+    Erstellt den Mail-Content (Subject, Text, HTML) aus dem Analyse-Ergebnis.
+    Entfernt <environment_details> Blöcke und formatiert als Markdown.
+    
+    Returns: (subject, text_body, html_body)
+    """
+    findings = result.get("findings", [])
+    report = extract_output_report(findings)
+    
+    threat_score = report.get("threat_score") or result.get("risk_score") or 0
+    vuln_score = report.get("vuln_score") or 0
+    risk_level = report.get("risk_level") or result.get("risk_level") or "UNKNOWN"
+    
+    summary = clean_llm_output(str(result.get("summary") or "Keine Zusammenfassung verfügbar."))
+    action_advice = clean_llm_output(str(result.get("action_advice") or ""))
+    
+    indicators = report.get("indicators") or []
+    
+    split_marker = "FALLS BEREITS GEKLICKT:" if lang == "de" else "IF ALREADY CLICKED:"
+    
+    if split_marker in action_advice:
+        parts = action_advice.split(split_marker, 1)
+        prevent_text = parts[0].strip()
+        if prevent_text.startswith("PRÄVENTION:") or prevent_text.startswith("PREVENTION:"):
+            prevent_text = prevent_text.split(":", 1)[1].strip()
+        incident_text = parts[1].strip()
+    else:
+        prevent_text = action_advice.strip()
+        incident_text = ""
+    
+    subject = f"[OSINT-Argus] Analyseergebnis - {risk_level}"
+    
+    indicators_text = ""
+    if indicators:
+        indicators_text = "\n\n### Haupt-Risikoindikatoren\n"
+        for ind in indicators:
+            clean_ind = clean_llm_output(str(ind))
+            if clean_ind and "<environment_details>" not in clean_ind:
+                indicators_text += f"- {clean_ind}\n"
+    
+    incident_text_formatted = ""
+    if incident_text:
+        incident_lines = [line.strip() for line in incident_text.split("\n") if line.strip() and "<environment_details>" not in line]
+        incident_text_formatted = "\n\n### Incident Response (falls bereits interagiert)\n"
+        for i, line in enumerate(incident_lines, 1):
+            incident_text_formatted += f"{i}. {line}\n"
+    
+    text_body = f"""# OSINT-Argus Analysebericht
+
+## Risiko-Level: **{risk_level}**
+## Risiko-Score: **{max(threat_score, vuln_score)}/100**
+
+### Zusammenfassung
+{summary}
+
+### Prävention
+{prevent_text}{indicators_text}{incident_text_formatted}
+---
+_Dies ist eine automatisierte Nachricht von OSINT-Argus._
+"""
+    
+    summary_html = summary.replace("\n", "<br>")
+    prevent_html = prevent_text.replace("\n", "<br>")
+    
+    indicators_html = ""
+    if indicators:
+        indicators_html = "<h3>Haupt-Risikoindikatoren</h3><ul>"
+        for ind in indicators:
+            clean_ind = clean_llm_output(str(ind))
+            if clean_ind and "<environment_details>" not in clean_ind:
+                indicators_html += f"<li>{clean_ind}</li>"
+        indicators_html += "</ul>"
+    
+    incident_html = ""
+    if incident_text:
+        incident_lines = [line.strip() for line in incident_text.split("\n") if line.strip() and "<environment_details>" not in line]
+        incident_html = "<h3>Incident Response (falls bereits interagiert)</h3><ol>"
+        for line in incident_lines:
+            incident_html += f"<li>{line}</li>"
+        incident_html += "</ol>"
+    
+    html_body = f"""
+<html>
+<head>
+<style>
+body {{ font-family: Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }}
+h2 {{ color: #1e40af; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }}
+h3 {{ color: #1e3a8a; margin-top: 25px; }}
+.risk-level {{ font-size: 1.5em; font-weight: bold; color: #dc2626; }}
+.score {{ font-size: 1.3em; font-weight: bold; color: #059669; }}
+ul, ol {{ margin-left: 20px; }}
+li {{ margin-bottom: 8px; }}
+.footer {{ margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 0.9em; font-style: italic; }}
+</style>
+</head>
+<body>
+<h2>OSINT-Argus Analysebericht</h2>
+<p class="risk-level">Risiko-Level: {risk_level}</p>
+<p class="score">Risiko-Score: {max(threat_score, vuln_score)}/100</p>
+
+<h3>Zusammenfassung</h3>
+<p>{summary_html}</p>
+
+<h3>Prävention</h3>
+<p>{prevent_html}</p>
+{indicators_html}
+{incident_html}
+<p class="footer">Dies ist eine automatisierte Nachricht von OSINT-Argus.</p>
+</body>
+</html>
+"""
+    
+    return subject, text_body.strip(), html_body.strip()
