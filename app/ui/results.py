@@ -6,6 +6,7 @@ Extrahiert und rendert die Ergebnisse der Analyse-Pipeline.
 import re
 import streamlit as st
 
+from app.utils.mail_branding import render_shell
 from app.ui.styles import LEVEL_COLOR, LEVEL_ICON, AGENT_ICON, level_badge, score_bar
 from app.ui.strings import t
 from app.utils.prompt_cleaner import clean_llm_output
@@ -276,117 +277,234 @@ def _render_agent_findings(findings: list, lang: str) -> None:
 
 # ── Mail-Content-Generator ────────────────────────────────────────────────────
 
+
+AGENT_LABEL = {
+    "domain":   {"en": "Domain Analysis",         "de": "Domain-Analyse"},
+    "email":    {"en": "Email Analysis",          "de": "E-Mail-Analyse"},
+    "cve":      {"en": "Vulnerability Scan (CVE)", "de": "Schwachstellen-Scan (CVE)"},
+    "phone":    {"en": "Phone Number Analysis",   "de": "Telefonnummer-Analyse"},
+    "file":     {"en": "File Analysis",           "de": "Datei-Analyse"},
+    "identity": {"en": "Identity / OSINT",        "de": "Identität / OSINT"},
+    "leak":     {"en": "Data Breach Check",       "de": "Datenleck-Prüfung"},
+}
+
+
+def _collect_agent_findings(findings: list) -> list[dict]:
+    """Sammelt ALLE Agent-Detail-Findings (ohne Orchestrator-Summary), dedupliziert."""
+    collected = []
+    seen = set()
+    for f in findings:
+        if isinstance(f, dict):
+            agent_raw = f.get("agent", "")
+            agent_val = (
+                agent_raw.get("value") if isinstance(agent_raw, dict)
+                else agent_raw.value if hasattr(agent_raw, "value")
+                else str(agent_raw)
+            )
+            inp = f.get("input", "")
+            threats = f.get("threat_sum", []) or []
+            vulns = f.get("vulnerability_sum", []) or []
+        elif hasattr(f, "agent"):
+            agent_val = f.agent.value if hasattr(f.agent, "value") else str(f.agent)
+            inp = getattr(f, "input", "")
+            threats = getattr(f, "threat_sum", []) or []
+            vulns = getattr(f, "vulnerability_sum", []) or []
+        else:
+            continue
+
+        if agent_val == "orchestrator":
+            continue
+        key = (agent_val, inp)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        collected.append({
+            "agent": agent_val,
+            "input": clean_llm_output(str(inp)),
+            "threats": [
+                clean_llm_output(str(t)) for t in threats
+                if str(t).strip() and "<environment_details>" not in str(t)
+            ],
+            "vulns": [
+                clean_llm_output(str(v)) for v in vulns
+                if str(v).strip() and "<environment_details>" not in str(v)
+            ],
+        })
+    return collected
+
+
 def map_result_to_mail(result: dict, lang: str = "en") -> tuple:
     """
-    Erstellt den Mail-Content (Subject, Text, HTML) aus dem Analyse-Ergebnis.
-    Entfernt <environment_details> Blöcke und formatiert als Markdown.
-    
-    Returns: (subject, text_body, html_body)
+    Erstellt Subject, Text- und HTML-Body aus dem Analyse-Ergebnis.
+    Enthält jetzt zusätzlich ALLE Detail-Findings der Einzel-Agenten
+    (Domain, Email, CVE, Phone, File, Identity, Leak) — nicht nur die
+    finale Zusammenfassung des OutputAgent.
     """
     findings = result.get("findings", [])
     report = extract_output_report(findings)
-    
-    threat_score = report.get("threat_score") or result.get("risk_score") or 0
-    vuln_score = report.get("vuln_score") or 0
-    risk_level = report.get("risk_level") or result.get("risk_level") or "UNKNOWN"
-    
-    summary = clean_llm_output(str(result.get("summary") or "Keine Zusammenfassung verfügbar."))
+
+    threat_score  = report.get("threat_score") or result.get("risk_score") or 0
+    vuln_score    = report.get("vuln_score") or 0
+    risk_level    = report.get("risk_level") or result.get("risk_level") or "UNKNOWN"
+    overall_score = max(threat_score, vuln_score)
+
+    summary = clean_llm_output(str(
+        result.get("summary")
+        or ("No summary available." if lang == "en" else "Keine Zusammenfassung verfügbar.")
+    ))
     action_advice = clean_llm_output(str(result.get("action_advice") or ""))
-    
     indicators = report.get("indicators") or []
-    
-    split_marker = "FALLS BEREITS GEKLICKT:" if lang == "de" else "IF ALREADY CLICKED:"
-    
+
+    split_marker = "IF ALREADY CLICKED:" if lang == "en" else "FALLS BEREITS GEKLICKT:"
     if split_marker in action_advice:
         parts = action_advice.split(split_marker, 1)
         prevent_text = parts[0].strip()
-        if prevent_text.startswith("PRÄVENTION:") or prevent_text.startswith("PREVENTION:"):
+        prefix = "PREVENTION:" if lang == "en" else "PRÄVENTION:"
+        if prevent_text.startswith(prefix):
             prevent_text = prevent_text.split(":", 1)[1].strip()
         incident_text = parts[1].strip()
     else:
         prevent_text = action_advice.strip()
         incident_text = ""
-    
-    subject = f"[OSINT-Argus] Analyseergebnis - {risk_level}"
-    
-    indicators_text = ""
-    if indicators:
-        indicators_text = "\n\n### Haupt-Risikoindikatoren\n"
-        for ind in indicators:
-            clean_ind = clean_llm_output(str(ind))
-            if clean_ind and "<environment_details>" not in clean_ind:
-                indicators_text += f"- {clean_ind}\n"
-    
-    incident_text_formatted = ""
-    if incident_text:
-        incident_lines = [line.strip() for line in incident_text.split("\n") if line.strip() and "<environment_details>" not in line]
-        incident_text_formatted = "\n\n### Incident Response (falls bereits interagiert)\n"
-        for i, line in enumerate(incident_lines, 1):
-            incident_text_formatted += f"{i}. {line}\n"
-    
-    text_body = f"""# OSINT-Argus Analysebericht
 
-## Risiko-Level: **{risk_level}**
-## Risiko-Score: **{max(threat_score, vuln_score)}/100**
+    incident_lines = [
+        line.strip() for line in incident_text.split("\n")
+        if line.strip() and "<environment_details>" not in line
+    ]
 
-### Zusammenfassung
-{summary}
+    agent_findings = _collect_agent_findings(findings)
 
-### Prävention
-{prevent_text}{indicators_text}{incident_text_formatted}
----
-_Dies ist eine automatisierte Nachricht von OSINT-Argus._
-"""
-    
+    subject = (
+        f"[OSINT-Argus] Analysis Result — {risk_level}" if lang == "en"
+        else f"[OSINT-Argus] Analyseergebnis — {risk_level}"
+    )
+
+    # ── TEXT-VERSION ──────────────────────────────────────────────────────
+    if lang == "en":
+        text_lines = [
+            "OSINT-ARGUS ANALYSIS REPORT", "=" * 60,
+            f"Risk Level:   {risk_level}",
+            f"Risk Score:   {overall_score}/100", "",
+            "SUMMARY", "-" * 60, summary, "",
+            "PREVENTION", "-" * 60, prevent_text, "",
+        ]
+        if indicators:
+            text_lines += ["KEY RISK INDICATORS", "-" * 60]
+            text_lines += [f"- {clean_llm_output(str(i))}" for i in indicators if clean_llm_output(str(i))]
+            text_lines.append("")
+        if incident_lines:
+            text_lines += ["IF ALREADY INTERACTED", "-" * 60]
+            text_lines += [f"{i}. {line}" for i, line in enumerate(incident_lines, 1)]
+            text_lines.append("")
+        if agent_findings:
+            text_lines += ["DETAILED AGENT FINDINGS", "=" * 60]
+            for af in agent_findings:
+                label = AGENT_LABEL.get(af["agent"], {}).get("en", af["agent"].upper())
+                text_lines.append(f"\n[{label}] — {af['input'][:80]}")
+                if af["threats"]:
+                    text_lines.append("  Threats:")
+                    text_lines += [f"    - {t}" for t in af["threats"]]
+                if af["vulns"]:
+                    text_lines.append("  Vulnerabilities / Findings:")
+                    text_lines += [f"    - {v}" for v in af["vulns"]]
+        text_lines += ["", "=" * 60, "This is an automated message from OSINT-Argus."]
+    else:
+        text_lines = [
+            "OSINT-ARGUS ANALYSEBERICHT", "=" * 60,
+            f"Risiko-Level:  {risk_level}",
+            f"Risiko-Score:  {overall_score}/100", "",
+            "ZUSAMMENFASSUNG", "-" * 60, summary, "",
+            "PRÄVENTION", "-" * 60, prevent_text, "",
+        ]
+        if indicators:
+            text_lines += ["HAUPT-RISIKOINDIKATOREN", "-" * 60]
+            text_lines += [f"- {clean_llm_output(str(i))}" for i in indicators if clean_llm_output(str(i))]
+            text_lines.append("")
+        if incident_lines:
+            text_lines += ["FALLS BEREITS INTERAGIERT", "-" * 60]
+            text_lines += [f"{i}. {line}" for i, line in enumerate(incident_lines, 1)]
+            text_lines.append("")
+        if agent_findings:
+            text_lines += ["DETAILLIERTE AGENT-BEFUNDE", "=" * 60]
+            for af in agent_findings:
+                label = AGENT_LABEL.get(af["agent"], {}).get("de", af["agent"].upper())
+                text_lines.append(f"\n[{label}] — {af['input'][:80]}")
+                if af["threats"]:
+                    text_lines.append("  Bedrohungen:")
+                    text_lines += [f"    - {t}" for t in af["threats"]]
+                if af["vulns"]:
+                    text_lines.append("  Schwachstellen / Befunde:")
+                    text_lines += [f"    - {v}" for v in af["vulns"]]
+        text_lines += ["", "=" * 60, "Dies ist eine automatisierte Nachricht von OSINT-Argus."]
+
+    text_body = "\n".join(text_lines)
+
+    # ── HTML-VERSION ──────────────────────────────────────────────────────
     summary_html = summary.replace("\n", "<br>")
     prevent_html = prevent_text.replace("\n", "<br>")
-    
+
     indicators_html = ""
     if indicators:
-        indicators_html = "<h3>Haupt-Risikoindikatoren</h3><ul>"
-        for ind in indicators:
-            clean_ind = clean_llm_output(str(ind))
-            if clean_ind and "<environment_details>" not in clean_ind:
-                indicators_html += f"<li>{clean_ind}</li>"
-        indicators_html += "</ul>"
-    
+        items = "".join(f"<li>{clean_llm_output(str(i))}</li>" for i in indicators if clean_llm_output(str(i)))
+        title = "Key Risk Indicators" if lang == "en" else "Haupt-Risikoindikatoren"
+        indicators_html = f'<h3 class="section">💡 {title}</h3><div class="card"><ul>{items}</ul></div>'
+
     incident_html = ""
-    if incident_text:
-        incident_lines = [line.strip() for line in incident_text.split("\n") if line.strip() and "<environment_details>" not in line]
-        incident_html = "<h3>Incident Response (falls bereits interagiert)</h3><ol>"
-        for line in incident_lines:
-            incident_html += f"<li>{line}</li>"
-        incident_html += "</ol>"
-    
-    html_body = f"""
-<html>
-<head>
-<style>
-body {{ font-family: Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }}
-h2 {{ color: #1e40af; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }}
-h3 {{ color: #1e3a8a; margin-top: 25px; }}
-.risk-level {{ font-size: 1.5em; font-weight: bold; color: #dc2626; }}
-.score {{ font-size: 1.3em; font-weight: bold; color: #059669; }}
-ul, ol {{ margin-left: 20px; }}
-li {{ margin-bottom: 8px; }}
-.footer {{ margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 0.9em; font-style: italic; }}
-</style>
-</head>
-<body>
-<h2>OSINT-Argus Analysebericht</h2>
-<p class="risk-level">Risiko-Level: {risk_level}</p>
-<p class="score">Risiko-Score: {max(threat_score, vuln_score)}/100</p>
+    if incident_lines:
+        items = "".join(f"<li>{line}</li>" for line in incident_lines)
+        title = "If Already Interacted" if lang == "en" else "Falls bereits interagiert"
+        incident_html = f'<h3 class="section">🚨 {title}</h3><div class="card danger"><ol class="incident">{items}</ol></div>'
 
-<h3>Zusammenfassung</h3>
-<p>{summary_html}</p>
+    agent_html = ""
+    if agent_findings:
+        title = "Detailed Agent Findings" if lang == "en" else "Detaillierte Agent-Befunde"
+        cards = ""
+        for af in agent_findings:
+            label = AGENT_LABEL.get(af["agent"], {}).get(lang, af["agent"].upper())
+            icon = AGENT_ICON.get(af["agent"], "⚙️")
+            threats_html = "".join(f"<li>{t}</li>" for t in af["threats"])
+            vulns_html = "".join(f"<li>{v}</li>" for v in af["vulns"])
+            threat_label = "Threats" if lang == "en" else "Bedrohungen"
+            vuln_label = "Vulnerabilities / Findings" if lang == "en" else "Schwachstellen / Befunde"
+            cards += f"""
+            <div class="agent-card">
+              <div class="agent-title">{icon} {label}</div>
+              <div class="agent-target">{af['input'][:100]}</div>
+              {f'<strong>{threat_label}:</strong><ul>{threats_html}</ul>' if af['threats'] else ''}
+              {f'<strong>{vuln_label}:</strong><ul>{vulns_html}</ul>' if af['vulns'] else ''}
+            </div>
+            """
+        agent_html = f'<h3 class="section">🔍 {title}</h3>{cards}'
 
-<h3>Prävention</h3>
-<p>{prevent_html}</p>
-{indicators_html}
-{incident_html}
-<p class="footer">Dies ist eine automatisierte Nachricht von OSINT-Argus.</p>
-</body>
-</html>
-"""
-    
+    score_label_threat = "Threat Score" if lang == "en" else "Bedrohungs-Score"
+    score_label_vuln = "Vulnerability Score" if lang == "en" else "Schwachstellen-Score"
+    summary_title = "Summary" if lang == "en" else "Zusammenfassung"
+    prevent_title = "Prevention" if lang == "en" else "Prävention"
+
+    body_html = f"""
+    <div class="score-row">
+      <div class="score-item"><div class="label">{score_label_threat}</div><div class="value">{threat_score}/100</div></div>
+      <div class="score-item"><div class="label">{score_label_vuln}</div><div class="value">{vuln_score}/100</div></div>
+      <div class="score-item"><div class="label">{"Risk Level" if lang == "en" else "Risiko-Level"}</div>
+        <div><span class="badge badge-{risk_level}">{risk_level}</span></div></div>
+    </div>
+
+    <h3 class="section">📄 {summary_title}</h3>
+    <div class="card">{summary_html}</div>
+
+    <h3 class="section">⚠️ {prevent_title}</h3>
+    <div class="card warn">{prevent_html}</div>
+
+    {indicators_html}
+    {incident_html}
+    {agent_html}
+    """
+
+    html_body = render_shell(
+        "👁️", "OSINT-Argus",
+        "Analysis Report" if lang == "en" else "Analysebericht",
+        body_html,
+    )
+
     return subject, text_body.strip(), html_body.strip()

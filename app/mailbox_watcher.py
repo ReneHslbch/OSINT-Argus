@@ -46,6 +46,7 @@ from app.models.router import OutputReport
 from app.mailbox_auth import (
     process_registration_email,
     get_registration_response,
+    get_registration_response_html,
     extract_sender_email,
     decode_mime_header,
     validate_access_key
@@ -541,8 +542,8 @@ def process_mailbox(rate_limiter: RateLimitTracker) -> int:
                         
                         if success and user:
                             response_text = get_registration_response(user)
-                            send_response_email_local(from_email, "OSINT-Argus Registrierung bestätigt", response_text, response_text)
-                            log(f"Registrierung erfolgreich für {from_email} (Key: {user.access_key})", "INFO")
+                            response_html = get_registration_response_html(user)   # NEU
+                            send_response_email_local(from_email, "OSINT-Argus Registrierung bestätigt", response_text, response_html)
                         else:
                             log(f"Registrierung fehlgeschlagen für {from_email}: {message}", "WARN")
                         

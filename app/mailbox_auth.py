@@ -8,6 +8,7 @@ import email
 from email.header import decode_header
 from typing import Optional, Tuple
 
+from app.utils.mail_branding import render_shell
 from app.mailbox_store import mailbox_store
 from app.models.mailbox_user import MailboxUser
 
@@ -148,3 +149,22 @@ Um den vollständigen Bericht einzusehen:
 ---
 OSINT-Argus Team
 """
+
+def get_registration_response_html(user: MailboxUser) -> str:
+    """Erstellt die HTML-Version der Registrierungs-Bestätigung im einheitlichen Branding."""
+    body = f"""
+    <p>Herzlich willkommen! Dein Zugang zum Mailbox-Service wurde erfolgreich eingerichtet.</p>
+    <p><strong>Dein persönlicher Access-Key:</strong></p>
+    <div class="key-box">{user.access_key}</div>
+    <div class="card warn">⚠️ Bewahre diesen Key sicher auf — er ist dein einziger Zugang zu deinen analysierten Mails.</div>
+    <div class="card accent">
+      <strong>So verwendest du deinen Key:</strong>
+      <ol>
+        <li>Öffne die OSINT-Argus Web-App</li>
+        <li>Wechsle zum Tab <strong>„📧 Mail“</strong></li>
+        <li>Gib deinen Access-Key ein, um deine analysierten Mails einzusehen</li>
+      </ol>
+    </div>
+    <p>Bei Fragen oder Problemen antworte einfach auf diese E-Mail.</p>
+    """
+    return render_shell("👁️", "OSINT-Argus", "Registrierung bestätigt", body)
