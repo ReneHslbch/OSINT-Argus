@@ -14,11 +14,17 @@ from app.utils.prompt_cleaner import clean_llm_output
 
 def render_results(result: dict, lang: str = "en") -> None:
     findings = result.get("findings") or []
-    report   = extract_output_report(findings)
-
-    threat_score = report["threat_score"] or 0
-    vuln_score   = report["vuln_score"]   or 0
-    risk_level   = report["risk_level"]   or result.get("risk_level") or "UNKNOWN"
+    report = extract_output_report(findings)
+    
+    # REPARATUR: Wenn das Text-Parsing 0/None liefert, nimm die echten Werte aus dem State!
+    threat_score = report["threat_score"] if report["threat_score"] not in (0, None) else (result.get("risk_score") or 0)
+    
+    # Falls du vulnerability_score im State hast, nimm den, ansonsten risk_score als Backup
+    vuln_score = report["vuln_score"] if report["vuln_score"] not in (0, None) else (result.get("vulnerability_score") or result.get("risk_score") or 0)
+    
+    risk_level = result.get("risk_level") or report["risk_level"] or "UNKNOWN"
+    
+    # ... (Rest der Funktion bleibt gleich)
     indicators   = report["indicators"]
 
     summary    = result.get("summary")      or ""
@@ -341,13 +347,17 @@ def map_result_to_mail(result: dict, lang: str = "en") -> tuple:
     (Domain, Email, CVE, Phone, File, Identity, Leak) — nicht nur die
     finale Zusammenfassung des OutputAgent.
     """
+    
     findings = result.get("findings", [])
     report = extract_output_report(findings)
-
-    threat_score  = report.get("threat_score") or result.get("risk_score") or 0
-    vuln_score    = report.get("vuln_score") or 0
-    risk_level    = report.get("risk_level") or result.get("risk_level") or "UNKNOWN"
+    
+    # REPARATUR: Echte State-Werte für die E-Mail erzwingen
+    threat_score = result.get("risk_score") if result.get("risk_score") is not None else (report.get("threat_score") or 0)
+    vuln_score = result.get("vulnerability_score") or result.get("risk_score") or report.get("vuln_score") or 0
+    risk_level = result.get("risk_level") or report.get("risk_level") or "UNKNOWN"
+    
     overall_score = max(threat_score, vuln_score)
+    # ... (Rest der Funktion bleibt gleich)
 
     summary = clean_llm_output(str(
         result.get("summary")

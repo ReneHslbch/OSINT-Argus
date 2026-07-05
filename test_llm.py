@@ -1,38 +1,50 @@
 """Test der LLM-Verbindung zum Provider."""
 import sys
-import io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+import time
+import os
+from dotenv import load_dotenv
 
-from app.models.llm import get_llm
+load_dotenv()
+
+def log(msg: str):
+    print(msg, flush=True)   # explizites flush statt Buffer-Hacks
+
 
 def test_llm_connection():
-    """Testet ob die LLM-Verbindung funktioniert."""
-    print("=" * 60)
-    print("LLM VERBINDUNGSTEST")
-    print("=" * 60)
-    
+    log("=" * 60)
+    log("LLM VERBINDUNGSTEST")
+    log("=" * 60)
+
+    log(f"OPENAI_BASE_URL = {os.getenv('OPENAI_BASE_URL')!r}")
+    log(f"MODEL_NAME      = {os.getenv('MODEL_NAME')!r}")
+    log(f"API_KEY gesetzt = {bool(os.getenv('OPENAI_API_KEY'))}")
+
+    # 1) Reiner Netzwerk-Test OHNE langchain — isoliert Provider/DNS/Firewall
+    log("\n[1/2] Teste rohen HTTP-Request zum Base-URL (10s Timeout)...")
+    try:
+        import httpx
+        t0 = time.time()
+        resp = httpx.get(os.getenv("OPENAI_BASE_URL"), timeout=10.0)
+        log(f"[OK] HTTP-Antwort nach {time.time() - t0:.1f}s — Status: {resp.status_code}")
+    except Exception as e:
+        log(f"[FEHLER] Roher HTTP-Request fehlgeschlagen/Timeout: {type(e).__name__}: {e}")
+
+    # 2) LangChain ChatOpenAI Call MIT explizitem, hartem Timeout
+    log("\n[2/2] Teste ChatOpenAI-Call (30s Timeout)...")
+    from app.models.llm import get_llm
     try:
         llm = get_llm()
-        print("[OK] LLM-Instanz erstellt")
-        print(f"  Model: {llm.model_name}")
-        print(f"  Timeout: {llm.request_timeout}")
-        
-        print("\nTeste einfache Chat-Anfrage...")
+        log("[OK] LLM-Instanz erstellt")
+        log(f"  Model: {llm.model_name}")
+
+        t0 = time.time()
         response = llm.invoke("Hallo, antworte kurz mit OK.")
-        print("[OK] Antwort erhalten:")
-        print(f"  {response.content}")
-        
-        print("\n" + "=" * 60)
-        print("[OK] ALLE TESTE BESTANDEN - LLM ist betriebsbereit")
-        print("=" * 60)
-        return True
-        
+        log(f"[OK] Antwort erhalten nach {time.time() - t0:.1f}s:")
+        log(f"  {response.content}")
+
     except Exception as e:
-        print(f"\n[FEHLER] {type(e).__name__}: {e}")
-        print("\n" + "=" * 60)
-        print("[FEHLER] LLM VERBINDUNG FEHLGESCHLAGEN")
-        print("=" * 60)
-        return False
+        log(f"[FEHLER] {type(e).__name__}: {e}")
+
 
 if __name__ == "__main__":
     test_llm_connection()
