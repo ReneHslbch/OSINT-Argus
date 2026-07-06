@@ -98,9 +98,9 @@ class DomainAgent(BaseAgent):
             threat_sum=analysis.get("threat_indicators", []),
             vulnerability_sum=analysis.get("exposure_findings", [])
         )
-        state["findings"].append(finding)
+        
         
         # Speicher die Summary im globalen Kontext ab
         state["memory_context"] = analysis.get("summary", "")
 
-        return state
+        return {**state, "findings": [finding]}

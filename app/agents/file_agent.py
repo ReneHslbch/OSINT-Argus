@@ -1,3 +1,5 @@
+import json
+
 from app.agents.base_agent import BaseAgent
 from app.models.llm import get_llm
 from app.models.file_analysis import FileAnalysis
@@ -89,14 +91,13 @@ VirusTotal-Ergebnisse:
                 )
 
         # 5. Befunde im globalen State speichern
-        state["findings"].append(
-            Findings(
+        finding = Findings(
                 agent=AgentType.FILE,
                 input=target,
                 threat_sum=analysis.threat_indicators,
                 vulnerability_sum=analysis.metadata_leaks,
             )
-        )
+        
         # NEU: Wenn das LLM Identitäten (wie Autoren) extrahiert hat, füttern wir sie zurück in den State
         if hasattr(analysis, "extracted_identities") and analysis.extracted_identities:
             for identity in analysis.extracted_identities:
@@ -109,4 +110,4 @@ VirusTotal-Ergebnisse:
         print(f"[INFO] {analysis.reasoning}")
 
 
-        return state
+        return {**state, "findings": [finding]}

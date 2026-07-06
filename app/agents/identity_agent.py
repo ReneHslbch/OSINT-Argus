@@ -152,8 +152,6 @@ OSINT-Rohdaten:
             vulnerability_sum=platform_entries if platform_entries else [f"Keine Profile gefunden für: {search_variants}"],
         )
 
-        state["findings"].append(finding)
-
         save_result(cache_key, {
             "agent": AgentType.IDENTITY,
             "input": target,
@@ -163,4 +161,4 @@ OSINT-Rohdaten:
 
         print(f"[IDENT] {target} abgeschlossen.")
         print(f"[WARN] Profil-Risiko: {analysis.risk_assessment}")
-        return state
+        return {**state, "findings": [finding]}
