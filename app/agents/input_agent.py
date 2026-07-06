@@ -7,6 +7,7 @@ from app.state import ArgusState
 from app.models.llm import get_llm
 from app.memory.chroma_memory import get_user_profile, save_user_profile
 from app.prompts import INPUT_AGENT_SYSTEM_PROMPT, INPUT_AGENT_PROFILER_PROMPT
+from app.utils.prompt_cleaner import clean_llm_output
 
 class InputExtraction(BaseModel):
     input_type: Literal["domain", "email", "text", "phone", "file", "identity", "unknown"] = Field(
@@ -36,13 +37,21 @@ class InputAgent(BaseAgent):
         self.profiler_llm = get_llm().with_structured_output(ProfileUpdate)
 
     def run(self, state: ArgusState) -> ArgusState:
-        user_input = state["user_input"]
+        # <environment_details> Block aus user_input entfernen
+        user_input = clean_llm_output(state["user_input"])
 
         # 1. Normale Extraktion ausfuhren
-        extraction: InputExtraction = self.llm.invoke([
+        extraction_raw = self.llm.invoke([
             {"role": "system", "content": INPUT_AGENT_SYSTEM_PROMPT},
             {"role": "user", "content": f"Analysiere folgenden Input und extrahiere alle Einzel-Targets sauber:\n\n{user_input}"}
         ])
+        
+        # Structured output sollte bereits sauber sein
+        if hasattr(extraction_raw, 'model_dump'):
+            extraction = extraction_raw
+        else:
+            cleaned = clean_llm_output(str(extraction_raw))
+            extraction = InputExtraction(**json.loads(cleaned))
 
         state["input_type"] = extraction.input_type
         state["to_scan"] = extraction.extracted_targets
@@ -62,10 +71,17 @@ class InputAgent(BaseAgent):
             current_profile = get_user_profile()
             
             try:
-                update: ProfileUpdate = self.profiler_llm.invoke([
+                update_raw = self.profiler_llm.invoke([
                     {"role": "system", "content": INPUT_AGENT_PROFILER_PROMPT},
                     {"role": "user", "content": f"Aktuelles Profil: {current_profile}\n\nNeuer Input-Text:\n{user_input}"}
                 ])
+                
+                # Structured output sollte bereits sauber sein
+                if hasattr(update_raw, 'model_dump'):
+                    update = update_raw
+                else:
+                    cleaned = clean_llm_output(str(update_raw))
+                    update = ProfileUpdate(**json.loads(cleaned))
                 
                 # Werte intelligent mergen (Überschreiben nur, wenn neue Infos gefunden wurden)
                 if update.extracted_vorname: current_profile["vorname"] = update.extracted_vorname

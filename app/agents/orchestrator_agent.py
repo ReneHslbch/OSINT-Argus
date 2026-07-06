@@ -6,6 +6,7 @@ from app.models.findings import Findings
 from app.models.agent_type import AgentType
 from app.tools.classifier import classify_input
 from app.prompts import ORCHESTRATOR_SYSTEM_PROMPT
+from app.utils.prompt_cleaner import clean_llm_output
 
 AGENT_MAPPING = {
     "email": "email",
@@ -41,6 +42,15 @@ class OrchestratorAgent(BaseAgent):
             state["current_check"] = None
 
         remaining = [item for item in state["to_scan"] if item not in state["scanned"]]
+
+        # Filtere Duplikate aus der Queue (behalte nur erste Vorkommnis)
+        seen = set()
+        unique_remaining = []
+        for item in remaining:
+            if item not in seen:
+                seen.add(item)
+                unique_remaining.append(item)
+        remaining = unique_remaining
 
         if not remaining and not state["to_scan"]:
             state["next_agent"] = "output"
@@ -87,10 +97,17 @@ class OrchestratorAgent(BaseAgent):
         Bestimme das nächste Ziel, filtere die verbleibende Queue und wähle den Agenten.
         """
 
-        decision: OrchestratorDecision = self.llm.invoke([
+        decision_raw = self.llm.invoke([
             {"role": "system", "content": ORCHESTRATOR_SYSTEM_PROMPT},
             {"role": "user", "content": user_content}
         ])
+        
+        # Structured output sollte bereits sauber sein
+        if hasattr(decision_raw, 'model_dump'):
+            decision = decision_raw
+        else:
+            cleaned = clean_llm_output(str(decision_raw))
+            decision = OrchestratorDecision(**json.loads(cleaned))
 
         state["next_agent"] = decision.next_agent
         state["current_check"] = decision.current_check

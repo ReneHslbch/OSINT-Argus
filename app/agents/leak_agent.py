@@ -58,8 +58,6 @@ class LeakAgent(BaseAgent):
             vulnerability_sum=vulnerability_sum
         )
 
-        findings_list.append(finding)
-        state["findings"] = findings_list
 
         print(f"[LEAK] Analyse fur {leak_target} abgeschlossen. Funde: {len(breaches)}")
-        return state
+        return {**state, "findings": [finding]}

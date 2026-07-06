@@ -1,9 +1,12 @@
+import json
+
 from app.agents.base_agent import BaseAgent
 from app.models.llm import get_llm
 from app.models.file_analysis import FileAnalysis
 from app.models.findings import Findings
 from app.models.agent_type import AgentType
 from app.state import ArgusState
+from app.utils.prompt_cleaner import clean_llm_output
 import os
 from app.tools.file_tools import (
     extract_universell_document_metadata,
@@ -51,7 +54,7 @@ class FileAgent(BaseAgent):
             vt_results.append(result)
 
         # 4. Analyse durch das LLM auswerten lassen
-        analysis: FileAnalysis = self.llm.invoke([
+        analysis_raw = self.llm.invoke([
             {
                 "role": "system",
                 "content": FILE_AGENT_SYSTEM_PROMPT
@@ -70,16 +73,31 @@ VirusTotal-Ergebnisse:
 """
             }
         ])
+        
+        # Structured output sollte bereits sauber sein, aber zur Sicherheit
+        if hasattr(analysis_raw, 'model_dump'):
+            analysis = analysis_raw
+        else:
+            cleaned = clean_llm_output(str(analysis_raw))
+            try:
+                analysis = FileAnalysis(**json.loads(cleaned))
+            except Exception:
+                analysis = FileAnalysis(
+                    threat_indicators=[],
+                    metadata_leaks=["Parsing-Fehler bei Datei-Analyse"],
+                    risk_level="UNKNOWN",
+                    reasoning="Konnte Analyse-Ergebnis nicht parsen.",
+                    extracted_identities=[]
+                )
 
         # 5. Befunde im globalen State speichern
-        state["findings"].append(
-            Findings(
+        finding = Findings(
                 agent=AgentType.FILE,
                 input=target,
                 threat_sum=analysis.threat_indicators,
                 vulnerability_sum=analysis.metadata_leaks,
             )
-        )
+        
         # NEU: Wenn das LLM Identitäten (wie Autoren) extrahiert hat, füttern wir sie zurück in den State
         if hasattr(analysis, "extracted_identities") and analysis.extracted_identities:
             for identity in analysis.extracted_identities:
@@ -92,4 +110,4 @@ VirusTotal-Ergebnisse:
         print(f"[INFO] {analysis.reasoning}")
 
 
-        return state
+        return {**state, "findings": [finding]}

@@ -10,6 +10,7 @@ from app.models.findings import Findings
 from app.models.agent_type import AgentType
 from app.tools.phone_tools import PHONE_TOOLS
 from app.prompts import PHONE_AGENT_SYSTEM_PROMPT
+from app.utils.prompt_cleaner import clean_llm_output
 
 llm = get_llm()
 
@@ -43,17 +44,11 @@ class PhoneAgent(BaseAgent):
         
         iteration_count = result.get("intermediate_steps", [])
         print(f"   ↳ PhoneAgent abgeschlossen in {elapsed_ms:.0f}ms ({len(iteration_count)} Tool-Aufrufe)")
-        llm_output = result.get("output", "").strip()
+        llm_output = clean_llm_output(result.get("output", ""))
 
         # Robustes JSON-Parsing
         try:
-            if "```" in llm_output:
-                content = llm_output.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                analysis = json.loads(content.strip())
-            else:
-                analysis = json.loads(llm_output)
+            analysis = json.loads(llm_output)
         except Exception:
             analysis = {
                 "threat_indicators": ["Parsing-Fehler bei Telefon-Analyse"],
@@ -68,7 +63,7 @@ class PhoneAgent(BaseAgent):
             threat_sum=analysis.get("threat_indicators", []),
             vulnerability_sum=analysis.get("exposure_findings", [])
         )
-        state["findings"].append(finding)
+       
         state["memory_context"] = analysis.get("summary", "")
 
-        return state
+        return {**state, "findings": [finding]}

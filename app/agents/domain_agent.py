@@ -10,6 +10,7 @@ from app.models.findings import Findings
 from app.models.agent_type import AgentType
 from app.tools.domain_tools import DOMAIN_TOOLS
 from app.prompts import DOMAIN_AGENT_SYSTEM_PROMPT
+from app.utils.prompt_cleaner import clean_llm_output
 
 llm = get_llm()
 
@@ -44,17 +45,23 @@ class DomainAgent(BaseAgent):
         
         iteration_count = result.get("intermediate_steps", [])
         print(f"   ↳ DomainAgent abgeschlossen in {elapsed_ms:.0f}ms ({len(iteration_count)} Tool-Aufrufe)")
-        llm_output = result.get("output", "").strip()
+        
+        # <environment_details> aus intermediate_steps entfernen (kann bei langen Tool-Antworten vorkommen)
+        cleaned_steps = []
+        for step in iteration_count:
+            if isinstance(step, tuple) and len(step) >= 2:
+                action, observation = step[0], step[1]
+                if isinstance(observation, str):
+                    observation = clean_llm_output(observation)
+                cleaned_steps.append((action, observation))
+            else:
+                cleaned_steps.append(step)
+        
+        llm_output = clean_llm_output(result.get("output", ""))
 
         # Robustes JSON Parsing der LLM-Ausgabe
         try:
-            if "```" in llm_output:
-                content = llm_output.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                analysis = json.loads(content.strip())
-            else:
-                analysis = json.loads(llm_output)
+            analysis = json.loads(llm_output)
         except Exception:
             # Fallback bei Parsing-Fehlern
             analysis = {
@@ -76,8 +83,11 @@ class DomainAgent(BaseAgent):
         # 2. Erkannte Technologien für den CVEAgent in die Queue werfen
         new_techs = analysis.get("discovered_technologies", [])
         if new_techs:
-            print(f"➕ [DomainAgent] {len(new_techs)} Technologien für CVE-Suche extrahiert ({', '.join(new_techs)}).")
-            state["to_scan"].extend(new_techs)
+            # Nur Technologien hinzufügen die noch nicht gescannt sind
+            filtered_techs = [t for t in new_techs if t not in state.get("scanned", []) and t not in state.get("to_scan", [])]
+            if filtered_techs:
+                print(f"➕ [DomainAgent] {len(filtered_techs)} neue Technologien für CVE-Suche extrahiert ({', '.join(filtered_techs)}).")
+                state["to_scan"].extend(filtered_techs)
             
         # ───────────────────────────────────────────────────────────────────
 
@@ -88,9 +98,9 @@ class DomainAgent(BaseAgent):
             threat_sum=analysis.get("threat_indicators", []),
             vulnerability_sum=analysis.get("exposure_findings", [])
         )
-        state["findings"].append(finding)
+        
         
         # Speicher die Summary im globalen Kontext ab
         state["memory_context"] = analysis.get("summary", "")
 
-        return state
+        return {**state, "findings": [finding]}

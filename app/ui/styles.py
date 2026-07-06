@@ -80,6 +80,7 @@ AGENT_ICON = {
     "input": "📥", "orchestrator": "🧠", "domain": "🌐",
     "email": "📧", "cve": "🛡️", "phone": "📞",
     "file": "📄", "identity": "👤", "output": "📊",
+    "leak": "🕵️",
 }
 
 
