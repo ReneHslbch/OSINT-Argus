@@ -1,18 +1,36 @@
+# --- Core Framework ---
 langgraph
 langchain
 langchain-core
 langchain-community
 langchain-openai
 chromadb
-python-dotenv
-python-whois
-dnspython
 pydantic
-certifi
+python-dotenv
+
+# --- Netzwerk / HTTP ---
 httpx
+requests
+certifi
+
+# --- Domain / DNS ---
+dnspython
+python-whois
+
+# --- OSINT Integrationen ---
+shodan
+vt-py              # VirusTotal API (falls direkt genutzt statt requests)
+sherlock-project   # Username-Enumeration
+holehe             # Email-Account-Enumeration
+
+# --- Telefon / Datei ---
 phonenumbers
 pypdf
 pyexiftool
+
+# --- Mailbox Watcher ---
+imap-tools
+
+# --- UI ---
 streamlit
 nest_asyncio
-imap-tools
