@@ -1,6 +1,9 @@
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
-import os
 import time
 from app.ui.analyse_tab import run_with_live_log
 from app.ui.archive import check_archiv
