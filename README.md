@@ -25,6 +25,17 @@ OSINT-Argus combines specialized cybersecurity agents into a single adaptive inv
 - [License](#-license)
 
 ---
+## Demo Video 
+
+### Analyse - Tab
+[![Videotitel](https://i9.ytimg.com/vi/na7jEPvA9Z8/mqdefault.jpg?sqp=CJjFptMG-oaymwEmCMACELQB8quKqQMa8AEB-AHUBoACyAOKAgwIABABGEYgTChlMA8=&rs=AOn4CLDXFNth0WIGD6QGXhZo59_oa7L_tQ)](https://youtu.be/na7jEPvA9Z8)
+
+### Indentity Check Tab
+[![Videotitel](https://i9.ytimg.com/vi/PPycxACuSQI/mqdefault.jpg?sqp=CMTHptMG-oaymwEmCMACELQB8quKqQMa8AEB-AH-CYACtgWKAgwIABABGCsgZShAMA8=&rs=AOn4CLAE6zmu2OSHfS9WSGTyaboKFKmpBw)](https://youtu.be/PPycxACuSQI)
+
+### Mail Tab
+[![Videotitel](https://i9.ytimg.com/vi/Z_95A8wVUjg/mqdefault.jpg?sqp=CMTHptMG-oaymwEmCMACELQB8quKqQMa8AEB-AH-CYACnAWKAgwIABABGGUgZShlMA8=&rs=AOn4CLAbwSr-lGNCq6qs0HQSPHunb6tAhQ)](https://youtu.be/Z_95A8wVUjg)
+---
 
 ## ✨ Features
 
