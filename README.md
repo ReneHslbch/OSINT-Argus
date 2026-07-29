@@ -36,7 +36,8 @@ OSINT-Argus combines specialized cybersecurity agents into a single adaptive inv
 ### Mail Tab
 [![Videotitel](https://i9.ytimg.com/vi/Z_95A8wVUjg/mqdefault.jpg?sqp=CMTHptMG-oaymwEmCMACELQB8quKqQMa8AEB-AH-CYACnAWKAgwIABABGGUgZShlMA8=&rs=AOn4CLAbwSr-lGNCq6qs0HQSPHunb6tAhQ)](https://youtu.be/Z_95A8wVUjg)
 ---
-
+## Pitch: OSINT-Argus-Final-Pitch.pdf
+---
 ## ✨ Features
 
 | Feature | Description |
